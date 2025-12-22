@@ -71,12 +71,13 @@ client.on('messageCreate', async m => {
     for await (const gen of res) {
       switch(gen.type) {
         case 'reasoning-start':
-          console.log('start thinking...');
+          console.log('start reasoning...');
           break;
         case 'reasoning-delta':
-          console.log(gen.text);
+          console.log('reasoning:', gen.text);
           break;
         case 'text-delta':
+          console.log('gen:', gen.text);
           text += gen.text;
           break;
         default:
