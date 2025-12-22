@@ -78,6 +78,8 @@ client.on('messageCreate', async m => {
           break;
         case 'text-delta':
           console.log('gen:', gen.text);
+          if(gen.text.startsWith('fc_') && gen.text.length === 53)
+            break; // ex: fc_09665a3dab3773fc0169493feb2210819fb242672633635b84
           text += gen.text;
           break;
         default:
