@@ -70,6 +70,12 @@ client.on('messageCreate', async m => {
 
     for await (const gen of res) {
       switch(gen.type) {
+        case 'reasoning-start':
+          console.log('start thinking...');
+          break;
+        case 'reasoning-delta':
+          console.log(gen.text);
+          break;
         case 'text-delta':
           text += gen.text;
           break;
@@ -78,7 +84,7 @@ client.on('messageCreate', async m => {
       }
     }
 
-    text += '-# model: rakutenai';
+    text += '\n-# model: rakutenai';
 
     const parts = splitLongString(text, 1500);
     let first = true;
