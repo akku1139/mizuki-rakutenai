@@ -62,7 +62,7 @@ client.on('messageCreate', async m => {
     const res = chat.sendMessage({
       mode: "USER_INPUT",
       contents: [
-        { type: 'text', text: m.content },
+        { type: 'text', text: m.content.replaceAll('<@1379433738143924284>', '') },
       ],
     });
 
