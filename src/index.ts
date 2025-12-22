@@ -111,7 +111,7 @@ client.on('messageCreate', async m => {
 
       text += '\n-# model: rakutenai';
 
-      const parts = splitLongString(text, 1500);
+      const parts = splitLongString(text.replace(/^####+ /gm, '### '), 1500);
       let first = true;
 
       for(const part of parts) {
