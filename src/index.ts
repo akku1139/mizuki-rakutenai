@@ -75,7 +75,7 @@ client.on('messageCreate', async m => {
 
     try {
       await previousTask;
-      console.info(m.id, 'start');
+      console.info(m.id, ': start');
 
       m.channel.sendTyping();
 
@@ -87,8 +87,11 @@ client.on('messageCreate', async m => {
       });
 
       let text = '';
+      let c = 0;
 
       for await (const gen of res) {
+        if(++c%7 === 0)
+          await m.channel.sendTyping();
         switch(gen.type) {
           case 'reasoning-start':
             console.log('start reasoning...');
@@ -99,12 +102,14 @@ client.on('messageCreate', async m => {
           case 'text-delta':
             console.log('gen:', gen.text);
             if(gen.text.startsWith('fc_') && gen.text.length === 53) {
+              await m.channel.sendTyping();
               await m.channel.send('-# function call...');
               break; // ex: fc_09665a3dab3773fc0169493feb2210819fb242672633635b84
             }
             text += gen.text;
             break;
           default:
+            console.log(m.id, 'gen :', gen);
             break;
         }
       }
