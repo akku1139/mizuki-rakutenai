@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, TextChannel, ThreadChannel } from 'discord.js';
+import { Client, GatewayIntentBits, Message, TextChannel, ThreadChannel } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
 
 const aiUser = await User.create();
@@ -42,7 +42,10 @@ client.on('ready', readyClient => {
   console.info(`Logged in as ${readyClient.user.tag}!`);
 });
 
-const chatStore: Map<string, Thread> = new Map();
+const chatStore: Map<string, {
+  t: Thread,
+  q: Promise<void>,
+}> = new Map();
 
 client.on('messageCreate', async m => {
   if(
@@ -52,53 +55,69 @@ client.on('messageCreate', async m => {
     && m.guild !== null
   ) {
     const chat = chatStore.get(m.channelId) ?? await (async () => {
-      const newChat = await aiUser.createThread();
+      const newChat = {
+        t: await aiUser.createThread(),
+        q: Promise.resolve(),
+      };
       chatStore.set(m.channelId, newChat);
       return newChat;
     })();
-
-    m.channel.sendTyping();
-
-    const res = chat.sendMessage({
-      mode: "USER_INPUT",
-      contents: [
-        { type: 'text', text: m.content.replaceAll('<@1379433738143924284>', '') },
-      ],
+    let resolveNext: () => void = () => console.error(m.id, 'Execute off-queue');
+    chat.q = new Promise((resolve) => {
+      resolveNext = resolve;
     });
 
-    let text = '';
+    try {
+      await chat.q;
+      console.info(m.id, 'start');
 
-    for await (const gen of res) {
-      switch(gen.type) {
-        case 'reasoning-start':
-          console.log('start reasoning...');
-          break;
-        case 'reasoning-delta':
-          console.log('reasoning:', gen.text);
-          break;
-        case 'text-delta':
-          console.log('gen:', gen.text);
-          if(gen.text.startsWith('fc_') && gen.text.length === 53)
-            break; // ex: fc_09665a3dab3773fc0169493feb2210819fb242672633635b84
-          text += gen.text;
-          break;
-        default:
-          break;
+      m.channel.sendTyping();
+
+      const res = chat.t.sendMessage({
+        mode: "USER_INPUT",
+        contents: [
+          { type: 'text', text: m.content.replaceAll('<@1379433738143924284>', '') },
+        ],
+      });
+
+      let text = '';
+
+      for await (const gen of res) {
+        switch(gen.type) {
+          case 'reasoning-start':
+            console.log('start reasoning...');
+            break;
+          case 'reasoning-delta':
+            console.log('reasoning:', gen.text);
+            break;
+          case 'text-delta':
+            console.log('gen:', gen.text);
+            if(gen.text.startsWith('fc_') && gen.text.length === 53)
+              break; // ex: fc_09665a3dab3773fc0169493feb2210819fb242672633635b84
+            text += gen.text;
+            break;
+          default:
+            break;
+        }
       }
-    }
 
-    text += '\n-# model: rakutenai';
+      text += '\n-# model: rakutenai';
 
-    const parts = splitLongString(text, 1500);
-    let first = true;
+      const parts = splitLongString(text, 1500);
+      let first = true;
 
-    for(const part of parts) {
-      if(first) {
-        await m.reply(part);
-        first = false;
-      } else {
-        await m.channel.send(part);
+      for(const part of parts) {
+        if(first) {
+          await m.reply(part);
+          first = false;
+        } else {
+          await m.channel.send(part);
+        }
       }
+    } catch(e) {
+      console.error(m.id, ': An error occurred during processing\n', e);
+    } finally {
+      resolveNext();
     }
   }
 });
