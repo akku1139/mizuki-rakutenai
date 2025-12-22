@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Message, TextChannel, ThreadChannel } from 'discord.js';
+import { Client, GatewayIntentBits, TextChannel, ThreadChannel } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
 
 const aiUser = await User.create();
@@ -62,13 +62,14 @@ client.on('messageCreate', async m => {
       chatStore.set(m.channelId, newChat);
       return newChat;
     })();
+    const previousTask = chat.q;
     let resolveNext: () => void = () => console.error(m.id, 'Execute off-queue');
     chat.q = new Promise((resolve) => {
       resolveNext = resolve;
     });
 
     try {
-      await chat.q;
+      await previousTask;
       console.info(m.id, 'start');
 
       m.channel.sendTyping();
