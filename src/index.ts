@@ -54,6 +54,11 @@ client.on('messageCreate', async m => {
     && (m.channel instanceof TextChannel || m.channel instanceof ThreadChannel)
     && m.guild !== null
   ) {
+    if(m.content === '<@1379433738143924284> clear') {
+      chatStore.delete(m.channelId);
+      await m.reply('chat context destroyed.');
+      return;
+    }
     const chat = chatStore.get(m.channelId) ?? await (async () => {
       const newChat = {
         t: await aiUser.createThread(),
