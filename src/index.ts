@@ -1,0 +1,97 @@
+import { Client, GatewayIntentBits, TextChannel, ThreadChannel } from 'discord.js';
+import { type Thread, User } from '@evex/rakutenai';
+
+const aiUser = await User.create();
+
+const client = new Client({ intents: [
+  GatewayIntentBits.Guilds,
+  GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.MessageContent,
+  GatewayIntentBits.GuildMembers,
+] });
+
+export const splitLongString = (text: string, len: number): Array<string> => {
+  const result: Array<string> = [];
+
+  let rest = text;
+  while(true) {
+    if(rest.length <= len) {
+      result.push(rest);
+      break;
+    }
+    const part = rest.substring(0, len);
+    const i = part.lastIndexOf('\n');
+    if(i === -1) {
+      result.push(part);
+      rest = rest.substring(len);
+    } else {
+      result.push(part.substring(0, i+1)); // i+1をiにすると改行は消化される
+      rest = rest.substring(i+1);
+    }
+    if(rest==='') break;
+  }
+
+  return result; // 空文字列をfilterしてあげればいい
+};
+
+client.on('error', async err => {
+  console.error(err.stack ?? err.name + '\n' + err.message);
+});
+
+client.on('ready', readyClient => {
+  console.info(`Logged in as ${readyClient.user.tag}!`);
+});
+
+const chatStore: Map<string, Thread> = new Map();
+
+client.on('messageCreate', async m => {
+  if(
+      !m.author.bot
+    && m.mentions.users.has(client.user!.id)
+    && (m.channel instanceof TextChannel || m.channel instanceof ThreadChannel)
+    && m.guild !== null
+  ) {
+    const chat = chatStore.get(m.channelId) ?? await (async () => {
+      const newChat = await aiUser.createThread();
+      chatStore.set(m.channelId, newChat);
+      return newChat;
+    })();
+
+    m.channel.sendTyping();
+
+    const res = chat.sendMessage({
+      mode: "USER_INPUT",
+      contents: [
+        { type: 'text', text: m.content },
+      ],
+    });
+
+    let text = '';
+
+    for await (const gen of res) {
+      switch(gen.type) {
+        case 'text-delta':
+          text += gen.text;
+          break;
+        default:
+          break;
+      }
+    }
+
+    text += '-# model: rakutenai';
+
+    const parts = splitLongString(text, 1500);
+    let first = true;
+
+    for(const part of parts) {
+      if(first) {
+        await m.reply(part);
+        first = false;
+      } else {
+        await m.channel.send(part);
+      }
+    }
+  }
+});
+
+client.login(process.env['DISCORD_TOKEN']);
