@@ -43,7 +43,7 @@ const createFileFromUrl = async (url: string, fileName: string): Promise<File> =
 
   // 3. Blobのメタデータを元にFileオブジェクトを作成
   // 第二引数にはファイル名、第三引数にはMIMEタイプ（任意）を指定
-  const metadata = { type: data.type };
+  const metadata = { type: data.type ?? 'text/plain' };
   return new File([data], fileName, metadata);
 }
 
