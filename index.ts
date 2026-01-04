@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, TextChannel, ThreadChannel } from 'discord.js';
+import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
 
 const aiUser = await User.create();
@@ -47,6 +47,22 @@ const chatStore: Map<string, {
   q: Promise<void>,
 }> = new Map();
 
+const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean) => {
+  const parts = splitLongString(text
+    .replace(/^####+ /gm, '### ')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, "[$1](<$2>)")
+  , 1500);
+
+  for(const part of parts) {
+    if(first) {
+      await m.reply(part);
+      first = false;
+    } else {
+      await m.channel.send(part);
+    }
+  }
+}
+
 client.on('messageCreate', async m => {
   if(
       !m.author.bot
@@ -89,6 +105,8 @@ client.on('messageCreate', async m => {
       let text = '';
       let c = 0;
 
+      let first = true;
+
       for await (const gen of res) {
         if(++c%7 === 0)
           await m.channel.sendTyping();
@@ -108,6 +126,13 @@ client.on('messageCreate', async m => {
             }
             text += gen.text;
             break;
+          case 'image':
+            console.log('image:', gen.url);
+            sendMessage(text, m, first);
+            first = false;
+            m.channel.send({ embeds: [
+              { image: { url: gen.url } }
+            ] })
           default:
             console.log(m.id, 'gen :', gen);
             break;
@@ -115,21 +140,7 @@ client.on('messageCreate', async m => {
       }
 
       text += '\n-# model: rakutenai';
-
-      const parts = splitLongString(text
-        .replace(/^####+ /gm, '### ')
-        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, "[$1](<$2>)")
-      , 1500);
-      let first = true;
-
-      for(const part of parts) {
-        if(first) {
-          await m.reply(part);
-          first = false;
-        } else {
-          await m.channel.send(part);
-        }
-      }
+      sendMessage(text, m, first);
     } catch(e) {
       console.error(m.id, ': An error occurred during processing\n', e);
     } finally {
