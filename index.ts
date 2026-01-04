@@ -34,6 +34,19 @@ export const splitLongString = (text: string, len: number): Array<string> => {
   return result; // 空文字列をfilterしてあげればいい
 };
 
+const createFileFromUrl = async (url: string, fileName: string): Promise<File> => {
+  // 1. URLからデータを取得
+  const response = await fetch(url);
+
+  // 2. ResponseをBlob（バイナリデータ）に変換
+  const data = await response.blob();
+
+  // 3. Blobのメタデータを元にFileオブジェクトを作成
+  // 第二引数にはファイル名、第三引数にはMIMEタイプ（任意）を指定
+  const metadata = { type: data.type };
+  return new File([data], fileName, metadata);
+}
+
 client.on('error', async err => {
   console.error(err.stack ?? err.name + '\n' + err.message);
 });
@@ -95,10 +108,17 @@ client.on('messageCreate', async m => {
 
       m.channel.sendTyping();
 
+      const files = await Promise.all(m.attachments.map(async f => {
+        console.log('file:', f.url, f.name);
+        const file = await createFileFromUrl(f.proxyURL, f.name);
+        return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
+      }));
+
       const res = chat.t.sendMessage({
         mode: "USER_INPUT",
         contents: [
           { type: 'text', text: m.content.replaceAll('<@1379433738143924284>', '') },
+          ...(files.map(f => ({ type: 'file', file: f } as const))),
         ],
       });
 

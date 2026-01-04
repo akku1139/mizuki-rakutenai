@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@evex/rakutenai':
-        specifier: jsr:^0.1.4
-        version: '@jsr/evex__rakutenai@0.1.4'
+        specifier: jsr:^0.1.7
+        version: '@jsr/evex__rakutenai@0.1.7'
       discord.js:
         specifier: ^14.25.1
         version: 14.25.1
@@ -45,8 +45,8 @@ packages:
     resolution: {integrity: sha512-wPlQDxEmlDg5IxhJPuxXr3Vy9AjYq5xCvFWGJyD7w7Np8ZGu+Mc+97LCoEc/+AYCo2IDpKioiH0/c/mj5ZR9Uw==}
     engines: {node: '>=16.11.0'}
 
-  '@jsr/evex__rakutenai@0.1.4':
-    resolution: {integrity: sha512-0eaJeJ7fLJ0DE9/mnE4HMydXjztraRqvUxqrnVqa1S9KUypt4S8B8fGimuabdgzPzwwvSytIl1XtgUihGB3e3w==, tarball: https://npm.jsr.io/~/11/@jsr/evex__rakutenai/0.1.4.tgz}
+  '@jsr/evex__rakutenai@0.1.7':
+    resolution: {integrity: sha512-X6XGB9w568H9/TIO0FjHutpjI6s7AzUiAKjzmYoYGL4d9wgeoxt2u0ZAxNsGwRo7bScrmWFtS6eEzQ7wjUuyOA==, tarball: https://npm.jsr.io/~/11/@jsr/evex__rakutenai/0.1.7.tgz}
 
   '@sapphire/async-queue@1.5.5':
     resolution: {integrity: sha512-cvGzxbba6sav2zZkH8GPf2oGk9yYoD5qrNWdu9fRehifgnFZJMV+nuy2nON2roRO4yQQ+v7MK/Pktl/HgfsUXg==}
@@ -165,7 +165,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@jsr/evex__rakutenai@0.1.4': {}
+  '@jsr/evex__rakutenai@0.1.7': {}
 
   '@sapphire/async-queue@1.5.5': {}
 
