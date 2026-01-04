@@ -114,25 +114,34 @@ client.on('messageCreate', async m => {
           case 'reasoning-start':
             console.log('start reasoning...');
             break;
+
           case 'reasoning-delta':
             console.log('reasoning:', gen.text);
             break;
+
           case 'text-delta':
             console.log('gen:', gen.text);
-            if(gen.text.startsWith('fc_') && gen.text.length === 53) {
-              await m.channel.sendTyping();
-              await m.channel.send('-# function call...');
-              break; // ex: fc_09665a3dab3773fc0169493feb2210819fb242672633635b84
-            }
             text += gen.text;
             break;
+
           case 'image':
             console.log('image:', gen.url);
-            sendMessage(text, m, first);
+
+            // テンプレ
+            await sendMessage(text, m, first);
+            text = '';
             first = false;
-            m.channel.send({ embeds: [
-              { image: { url: gen.url } }
-            ] })
+
+            await m.channel.send({ embeds: [
+              { image: { url: gen.url } },
+            ] });
+            break;
+
+          case 'tool-call':
+            await m.channel.sendTyping();
+            await m.channel.send('-# function call...');
+            break;
+
           default:
             console.log(m.id, 'gen :', gen);
             break;
@@ -140,7 +149,7 @@ client.on('messageCreate', async m => {
       }
 
       text += '\n-# model: rakutenai';
-      sendMessage(text, m, first);
+      await sendMessage(text, m, first);
     } catch(e) {
       console.error(m.id, ': An error occurred during processing\n', e);
     } finally {
