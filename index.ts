@@ -1,8 +1,6 @@
 import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
 
-const aiUser = await User.create();
-
 const client = new Client({ intents: [
   GatewayIntentBits.Guilds,
   GatewayIntentBits.GuildMessages,
@@ -94,7 +92,7 @@ client.on('messageCreate', async m => {
     }
     const chat = chatStore.get(m.channelId) ?? await (async () => {
       const newChat = {
-        t: await aiUser.createThread(),
+        t: await (await User.create()).createThread(),
         q: Promise.resolve(),
       };
       chatStore.set(m.channelId, newChat);
@@ -134,7 +132,7 @@ client.on('messageCreate', async m => {
 
       for await (const gen of res) {
         if(++c%7 === 0)
-          await m.channel.sendTyping(); // これawaitしなくてもいいはず
+          m.channel.sendTyping();
         switch(gen.type) {
           case 'reasoning-start':
             console.log('start reasoning...');
@@ -152,6 +150,7 @@ client.on('messageCreate', async m => {
           case 'image-thumbnail':
           case 'image':
             console.log('image:', gen.url);
+            m.channel.sendTyping();
 
             if(text) {
               await sendMessage(text, m, first);
@@ -172,7 +171,7 @@ client.on('messageCreate', async m => {
             break;
 
           case 'tool-call':
-            await m.channel.sendTyping();
+            m.channel.sendTyping();
             await m.channel.send('-# function call...');
             break;
 
