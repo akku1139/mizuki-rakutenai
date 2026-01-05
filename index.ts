@@ -150,25 +150,19 @@ client.on('messageCreate', async m => {
             break;
 
           case 'image-thumbnail':
-            console.log('image-wip:', gen.url);
-
-            if(last) await last.edit({ content: gen.url });
-            else last = await sendMessage(gen.url, m, first);
-            first = false;
-
-            await m.channel.sendTyping();
-            break;
-
           case 'image':
             console.log('image:', gen.url);
 
-            // テンプレ
+            if(text) {
+              await sendMessage(text, m, first);
+              text = '';
+              first = false;
+            }
+
             if(last) await last.edit({ content: gen.url });
             else last = await sendMessage(gen.url, m, first);
 
-            text = '';
-            first = false;
-            last = void 0
+            if(gen.type === 'image') last = void 0;
 
             /* なぜかembedの画像が一瞬で消える
             await m.channel.send({ embeds: [
