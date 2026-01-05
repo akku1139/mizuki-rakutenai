@@ -60,20 +60,24 @@ const chatStore: Map<string, {
   q: Promise<void>,
 }> = new Map();
 
-const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean) => {
+const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message> => {
   const parts = splitLongString(text
     .replace(/^####+ /gm, '### ')
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, "[$1](<$2>)")
   , 1500);
 
+  let sent: Message = m; // ここゴミ
+
   for(const part of parts) {
     if(first) {
-      await m.reply(part);
+      sent = await m.reply(part);
       first = false;
     } else {
-      await m.channel.send(part);
+      sent = await m.channel.send(part);
     }
   }
+
+  return sent;
 }
 
 client.on('messageCreate', async m => {
@@ -126,10 +130,11 @@ client.on('messageCreate', async m => {
       let c = 0;
 
       let first = true;
+      let last: Message|undefined;
 
       for await (const gen of res) {
         if(++c%7 === 0)
-          await m.channel.sendTyping();
+          await m.channel.sendTyping(); // これawaitしなくてもいいはず
         switch(gen.type) {
           case 'reasoning-start':
             console.log('start reasoning...');
@@ -144,17 +149,32 @@ client.on('messageCreate', async m => {
             text += gen.text;
             break;
 
+          case 'image-thumbnail':
+            console.log('image-wip:', gen.url);
+
+            if(last) await last.edit({ content: gen.url });
+            else last = await sendMessage(gen.url, m, first);
+            first = false;
+
+            await m.channel.sendTyping();
+            break;
+
           case 'image':
             console.log('image:', gen.url);
 
             // テンプレ
-            await sendMessage(text, m, first);
+            if(last) await last.edit({ content: gen.url });
+            else last = await sendMessage(gen.url, m, first);
+
             text = '';
             first = false;
+            last = void 0
 
+            /* なぜかembedの画像が一瞬で消える
             await m.channel.send({ embeds: [
               { image: { url: gen.url } },
             ] });
+            */
             break;
 
           case 'tool-call':
