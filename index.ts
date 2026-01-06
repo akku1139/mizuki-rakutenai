@@ -204,6 +204,7 @@ let totalVolume: number = 0;
 let lastSide: string = "";
 let lastSymbol: string = "";
 let hasNewData: boolean = false;
+let lastTxCount: number = 0;
 let watch114514channel: SendableChannels;
 client.on('ready', async (c) => {
   const ch = await c.channels.fetch('1458031541652557935');
@@ -227,9 +228,9 @@ const mexc = new MexcWebsocketClient((event) => {
         lastPrice = lastTrade.price;
         lastSide = lastTrade.tradeType === 1 ? '🟢 BUY' : '🔴 SELL';
 
-        // 10秒間の合計出来高を計算（オプション）
         dealsArray.forEach(d => {
           totalVolume += parseFloat(d.quantity);
+          ++lastTxCount;
         });
 
         hasNewData = true; // データが更新されたフラグ
@@ -243,9 +244,10 @@ setInterval(async () => {
   if (!hasNewData) return;
 
   const message = `📊 **【${lastSymbol}】定期報告**\n` +
-                  `💰 現在価格: \`${lastPrice}\`\n` +
+                  `💰 現在価格: \`${lastPrice} USDT\`\n` +
                   `動向: ${lastSide}\n` +
-                  `直近10秒の出来高: \`${totalVolume.toFixed(2)}\`\n` +
+                  `直近10秒の出来高: \`${totalVolume.toFixed(2)} USDT\`\n` +
+                  `📈 取引回数: ${lastTxCount} Trades` +
                   `⏰ 時刻: ${new Date().toLocaleTimeString()}`;
   watch114514channel.send({ embeds: [{ description: message }] });
   // console.log(message);
@@ -253,6 +255,7 @@ setInterval(async () => {
   // 送信後にバッファをリセット
   hasNewData = false;
   totalVolume = 0;
+  lastTxCount = 0;
 }, 10000); // 10000ms = 10秒
 
 mexc.subscribe(['spot@public.aggre.deals.v3.api.pb@100ms@114514USDT']);
