@@ -127,7 +127,8 @@ client.on('messageCreate', async m => {
         const ref = await m.channel.messages.fetch(m.reference.messageId).catch(console.error);
         rep = (await Promise.all(
           (await m.channel.messages.fetch({ around: m.reference.messageId, limit: 10 }))
-            .filter(fm => fm.author.id === ref?.author.id)
+            .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+            .filter(fm => fm.author.id === ref?.author.id) // 非連続でも拾うけどいいよね
             .map(async (fm) => {
               files.push(...await Promise.all(fm.attachments.map(async f => {
                 console.log('file:', f.url, f.name);
