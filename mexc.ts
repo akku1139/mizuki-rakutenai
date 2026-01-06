@@ -131,15 +131,3 @@ export class MexcWebsocketClient {
     }
   }
 }
-
-// --- 使用例 ---
-const client = new MexcWebsocketClient((data) => {
-  console.log('Market Data:', data);
-});
-
-client.connect();
-
-// BTCUSDTの約定データを購読
-setTimeout(() => {
-  client.subscribe(['spot@public.aggre.deals.v3.api.pb@100ms@BTCUSDT']);
-}, 1000);

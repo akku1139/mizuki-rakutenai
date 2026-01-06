@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel } from 'discord.js';
+import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel, type SendableChannels } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
 import { MexcWebsocketClient } from './mexc.ts';
 
@@ -199,33 +199,63 @@ client.on('messageCreate', async m => {
 
 
 /// watch 114514 coin
-const mexc = new MexcWebsocketClient((event) => {
-if (event.type === 'MARKET_DATA') {
-    const wrapper = event.data;
+let lastPrice: string = "0";
+let totalVolume: number = 0;
+let lastSide: string = "";
+let lastSymbol: string = "";
+let hasNewData: boolean = false;
+let watch114514channel: SendableChannels;
+client.on('ready', async (c) => {
+  const ch = await c.channels.fetch('1458031541652557935');
+  if(!ch || !ch.isSendable()) throw new Error('failed to get 114514 channel');
+  watch114514channel = ch;
+});
 
-    // wrapper.publicDeals は存在することが判明済み
-    const publicDeals = wrapper.publicDeals;
+const mexc = new MexcWebsocketClient((event) => {
+  // console.log(event);
+  if (event.type === 'MARKET_DATA') {
+    const wrapper = event.data;
+    const publicDeals = wrapper.publicAggreDeals;
 
     if (publicDeals) {
-      const symbol = wrapper.symbol;
       const dealsArray = publicDeals.deals;
 
-      if (dealsArray && Array.isArray(dealsArray)) {
-        dealsArray.forEach((deal) => {
-          // 個別のプロパティもキャメルケース（tradeType等）になっているか確認
-          const side = deal.tradeType === 1 ? 'BUY' : 'SELL';
-          const price = deal.price;
-          const qty = deal.quantity;
+      if (dealsArray && dealsArray.length > 0) {
+        // 10秒間の最後の約定データを最新として保持
+        const lastTrade = dealsArray[dealsArray.length - 1];
+        lastPrice = lastTrade.price;
+        lastSide = lastTrade.tradeType === 1 ? '🟢 BUY' : '🔴 SELL';
 
-          const message = `[${symbol}] ${side} | Price: ${price} | Qty: ${qty}`;
-          console.log(message);
-          // postToDiscord(message);
+        // 10秒間の合計出来高を計算（オプション）
+        dealsArray.forEach(d => {
+          totalVolume += parseFloat(d.quantity);
         });
+
+        hasNewData = true; // データが更新されたフラグ
       }
     }
   }
 });
 
-mexc.subscribe([`spot@public.aggre.deals.v3.api.pb@100ms@114514USDT`]);
+setInterval(async () => {
+  // 新しいデータがない場合は送らない
+  if (!hasNewData) return;
+
+  const message = `📊 **【${lastSymbol}】定期報告**\n` +
+                  `💰 現在価格: \`${lastPrice}\`\n` +
+                  `動向: ${lastSide}\n` +
+                  `直近10秒の出来高: \`${totalVolume.toFixed(2)}\`\n` +
+                  `⏰ 時刻: ${new Date().toLocaleTimeString()}`;
+
+  watch114514channel.send({ embeds: [{ description: message }] });
+  // console.log(message);
+
+  // 送信後にバッファをリセット
+  hasNewData = false;
+  totalVolume = 0;
+}, 10000); // 10000ms = 10秒
+
+mexc.subscribe(['spot@public.aggre.deals.v3.api.pb@100ms@114514USDT']);
+mexc.connect();
 
 client.login(process.env['DISCORD_TOKEN']);
