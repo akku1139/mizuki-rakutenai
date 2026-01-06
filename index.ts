@@ -247,9 +247,11 @@ setInterval(async () => {
                   `💰 現在価格: \`${lastPrice} USDT\`\n` +
                   `動向: ${lastSide}\n` +
                   `直近10秒の出来高: \`${totalVolume.toFixed(2)} USDT\`\n` +
-                  `📈 取引回数: ${lastTxCount} Trades` +
-                  `⏰ 時刻: ${new Date().toLocaleTimeString()}`;
-  watch114514channel.send({ embeds: [{ description: message }] });
+                  `📈 取引回数: ${lastTxCount} Trades\n`;
+  watch114514channel.send({ embeds: [{
+    description: message,
+    timestamp: new Date().toISOString(),
+  }] });
   // console.log(message);
 
   // 送信後にバッファをリセット
