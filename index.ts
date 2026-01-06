@@ -230,9 +230,9 @@ const mexc = new MexcWebsocketClient((event) => {
 
         dealsArray.forEach(d => {
           totalVolume += parseFloat(d.quantity);
-          ++lastTxCount;
         });
 
+        lastTxCount += dealsArray.length;
         hasNewData = true; // データが更新されたフラグ
       }
     }
