@@ -11,5 +11,8 @@
     "@evex/rakutenai": "jsr:^0.1.10",
     "discord.js": "^14.25.1",
     "google-protobuf": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/google-protobuf": "^3.15.12"
   }
 }

@@ -199,6 +199,33 @@ client.on('messageCreate', async m => {
 
 
 /// watch 114514 coin
+const mexc = new MexcWebsocketClient((event) => {
+if (event.type === 'MARKET_DATA') {
+    const wrapper = event.data;
 
+    // wrapper.publicDeals は存在することが判明済み
+    const publicDeals = wrapper.publicDeals;
+
+    if (publicDeals) {
+      const symbol = wrapper.symbol;
+      const dealsArray = publicDeals.deals;
+
+      if (dealsArray && Array.isArray(dealsArray)) {
+        dealsArray.forEach((deal) => {
+          // 個別のプロパティもキャメルケース（tradeType等）になっているか確認
+          const side = deal.tradeType === 1 ? 'BUY' : 'SELL';
+          const price = deal.price;
+          const qty = deal.quantity;
+
+          const message = `[${symbol}] ${side} | Price: ${price} | Qty: ${qty}`;
+          console.log(message);
+          // postToDiscord(message);
+        });
+      }
+    }
+  }
+});
+
+mexc.subscribe([`spot@public.aggre.deals.v3.api.pb@100ms@114514USDT`]);
 
 client.login(process.env['DISCORD_TOKEN']);
