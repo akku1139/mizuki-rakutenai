@@ -2,6 +2,7 @@
 
 import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
+import { MexcWebsocketClient } from './mexc.ts';
 
 const client = new Client({ intents: [
   GatewayIntentBits.Guilds,
@@ -54,6 +55,9 @@ client.on('error', async err => {
 client.on('ready', readyClient => {
   console.info(`Logged in as ${readyClient.user.tag}!`);
 });
+
+
+/// AI feature
 
 const chatStore: Map<string, {
   t: Thread,
@@ -192,5 +196,9 @@ client.on('messageCreate', async m => {
     }
   }
 });
+
+
+/// watch 114514 coin
+
 
 client.login(process.env['DISCORD_TOKEN']);

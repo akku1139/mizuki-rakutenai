@@ -14,6 +14,9 @@ importers:
       discord.js:
         specifier: ^14.25.1
         version: 14.25.1
+      google-protobuf:
+        specifier: ^4.0.1
+        version: 4.0.1
 
 packages:
 
@@ -79,6 +82,9 @@ packages:
 
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
+
+  google-protobuf@4.0.1:
+    resolution: {integrity: sha512-0I4mx3UtAwpcc8l9Ds5gHcwV2FyPdwvxxBcor8LusE4b6PjoFxEngZRBepjvuQ4B0eZ2iu/Vezh8oRsnpJ9UGA==}
 
   lodash.snakecase@4.1.1:
     resolution: {integrity: sha512-QZ1d4xoBHYUeuouhEq3lk3Uq7ldgyFXGBhg04+oRLnIz8o9T65Eh+8YdroUwn846zchkA9yDsDl5CVVaV2nqYw==}
@@ -208,6 +214,8 @@ snapshots:
       - utf-8-validate
 
   fast-deep-equal@3.1.3: {}
+
+  google-protobuf@4.0.1: {}
 
   lodash.snakecase@4.1.1: {}
 
