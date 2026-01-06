@@ -139,7 +139,7 @@ client.on('messageCreate', async m => {
         )).join('\n');
       }
 
-      const input = (rep + m.content).replaceAll('<@1379433738143924284>', '');
+      const input = (rep + '\n\n' + m.content).replaceAll('<@1379433738143924284>', '');
       console.log(m.id, input);
 
       const res = chat.t.sendMessage({
