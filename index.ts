@@ -122,10 +122,30 @@ client.on('messageCreate', async m => {
         return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
       }));
 
+      let rep: string = '';
+      if(m.reference?.messageId) {
+        const ref = await m.channel.messages.fetch(m.reference.messageId).catch(console.error);
+        rep = (await Promise.all(
+          (await m.channel.messages.fetch({ around: m.reference.messageId, limit: 10 }))
+            .filter(fm => fm.author.id === ref?.author.id)
+            .map(async (fm) => {
+              files.push(...await Promise.all(fm.attachments.map(async f => {
+                console.log('file:', f.url, f.name);
+                const file = await createFileFromUrl(f.proxyURL, f.name);
+                return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
+              })) );
+              return fm.content.replace(/^/gm, "> ");
+            })
+        )).join('\n');
+      }
+
+      const input = (rep + m.content).replaceAll('<@1379433738143924284>', '');
+      console.log(m.id, input);
+
       const res = chat.t.sendMessage({
         mode: "USER_INPUT",
         contents: [
-          { type: 'text', text: m.content.replaceAll('<@1379433738143924284>', '') },
+          { type: 'text', text: input },
           ...(files.map(f => ({ type: 'file', file: f } as const))),
         ],
       });
