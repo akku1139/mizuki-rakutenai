@@ -2,15 +2,19 @@
 
 import { PushDataV3ApiWrapper } from './mexc-proto/PushDataV3ApiWrapper.ts';
 
+type WsEvent =
+  | { type: 'MARKET_DATA'; data: PushDataV3ApiWrapper }
+  | { type: 'CONTROL'; data: any };
+
 export class MexcWebsocketClient {
   #ws: WebSocket | null = null;
   readonly #baseUrl = 'wss://wbs-api.mexc.com/ws';
   #pingInterval: ReturnType<typeof setInterval> | null = null;
   #reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   #subscriptions: Set<string> = new Set();
-  #onMessage: (data: any) => void;
+  #onMessage: (data: WsEvent) => void;
 
-  constructor(onMessage: (data: any) => void) {
+  constructor(onMessage: (data: WsEvent) => void) {
     this.#onMessage = onMessage;
   }
 
@@ -65,21 +69,30 @@ export class MexcWebsocketClient {
   }
 
   #handleMessage(event: MessageEvent): void {
-    try {
-      // PING/PONGや購読確認などはJSONで届く
-      if (typeof event.data === 'string') {
-        const data = JSON.parse(event.data);
-        if (data.msg === 'PONG') return;
-        this.#onMessage(data);
+    // 1. JSONメッセージの処理
+    if (typeof event.data === 'string') {
+      try {
+        const json = JSON.parse(event.data);
+        // メインループをブロックしないよう非同期で通知
+        queueMicrotask(() => this.#onMessage({ type: 'CONTROL', data: json }));
+      } catch (e) {
+        console.error('JSON Parse Error', e);
       }
-      // マーケットデータ（Protobuf）は ArrayBuffer で届く
-      else if (event.data instanceof ArrayBuffer) {
-        const decoded = PushDataV3ApiWrapper.deserializeBinary(new Uint8Array(event.data));
-        this.#onMessage(decoded);
-        console.log('Binary data received (Protobuf)');
+      return;
+    }
+
+    // 2. Protobufメッセージの処理
+    if (event.data instanceof ArrayBuffer) {
+      try {
+        const uint8 = new Uint8Array(event.data);
+        const decoded = PushDataV3ApiWrapper.deserializeBinary(uint8);
+
+        // デコード済みデータを非同期で通知
+        // これにより、Discord送信処理が重くてもWSの受信（TCPバッファ）を止めない
+        queueMicrotask(() => this.#onMessage({ type: 'MARKET_DATA', data: decoded }));
+      } catch (e) {
+        console.error('Protobuf Deserialization Error', e);
       }
-    } catch (e) {
-      console.error('Data parsing error:', e);
     }
   }
 
