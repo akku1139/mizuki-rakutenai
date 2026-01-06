@@ -218,6 +218,7 @@ const mexc = new MexcWebsocketClient((event) => {
     const publicDeals = wrapper.publicAggreDeals;
 
     if (publicDeals) {
+      lastSymbol = wrapper.symbol;
       const dealsArray = publicDeals.deals;
 
       if (dealsArray && dealsArray.length > 0) {
@@ -246,7 +247,6 @@ setInterval(async () => {
                   `動向: ${lastSide}\n` +
                   `直近10秒の出来高: \`${totalVolume.toFixed(2)}\`\n` +
                   `⏰ 時刻: ${new Date().toLocaleTimeString()}`;
-
   watch114514channel.send({ embeds: [{ description: message }] });
   // console.log(message);
 
