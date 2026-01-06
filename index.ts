@@ -246,7 +246,7 @@ setInterval(async () => {
   const message = `📊 **【${lastSymbol}】定期報告**\n` +
                   `💰 現在価格: \`${lastPrice} USDT\`\n` +
                   `動向: ${lastSide}\n` +
-                  `直近10秒の出来高: \`${totalVolume.toFixed(2)} USDT\`\n` +
+                  `直近30秒の出来高: \`${totalVolume.toFixed(2)} USDT\`\n` +
                   `📈 取引回数: ${lastTxCount} Trades\n`;
   watch114514channel.send({ embeds: [{
     description: message,
@@ -258,7 +258,7 @@ setInterval(async () => {
   hasNewData = false;
   totalVolume = 0;
   lastTxCount = 0;
-}, 10000); // 10000ms = 10秒
+}, 30000); // 10000ms = 10秒
 
 mexc.subscribe(['spot@public.aggre.deals.v3.api.pb@100ms@114514USDT']);
 mexc.connect();
