@@ -148,7 +148,7 @@ client.on('messageCreate', async m => {
                   const file = await createFileFromUrl(f.proxyURL, f.name);
                   return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
                 })) );
-                return fm.content.replace(/^/gm, "> ") + ( (ref.embeds && ref.embeds.length !== 0) ? ('\n> embed > ' + JSON.stringify(ref.embeds)) : '');
+                return fm.content.replace(/^/gm, "> ") + ( (fm.embeds && fm.embeds.length !== 0) ? ('\n> embed > ' + JSON.stringify(fm.embeds)) : '');
               })
           )).join('\n');
           rep += '\n\n';
