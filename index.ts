@@ -211,6 +211,10 @@ client.on('messageCreate', async m => {
             await m.channel.send('-# function call...');
             break;
 
+          case 'error':
+            await m.channel.send(`ERROR:\n\`\`\`json\n${JSON.stringify(gen, null, 2)}\n\`\`\``);
+            break;
+
           default:
             console.log(m.id, 'gen :', gen);
             break;

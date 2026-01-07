@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@evex/rakutenai':
-        specifier: jsr:^0.1.10
-        version: '@jsr/evex__rakutenai@0.1.10'
+        specifier: jsr:^0.1.11
+        version: '@jsr/evex__rakutenai@0.1.11'
       discord.js:
         specifier: ^14.25.1
         version: 14.25.1
@@ -52,8 +52,8 @@ packages:
     resolution: {integrity: sha512-wPlQDxEmlDg5IxhJPuxXr3Vy9AjYq5xCvFWGJyD7w7Np8ZGu+Mc+97LCoEc/+AYCo2IDpKioiH0/c/mj5ZR9Uw==}
     engines: {node: '>=16.11.0'}
 
-  '@jsr/evex__rakutenai@0.1.10':
-    resolution: {integrity: sha512-TNGEUON56+74SwBEu/mfDzXxVe8G9FrfT/SMRCqnWkdOqfD/4GamYPjyiiGMQCeltijB0octiCVXy3vpZcGCgg==, tarball: https://npm.jsr.io/~/11/@jsr/evex__rakutenai/0.1.10.tgz}
+  '@jsr/evex__rakutenai@0.1.11':
+    resolution: {integrity: sha512-hRLCr7RdpAPdcAa5jTzTtLfAwEuspEjWSfDIj6R+lIqyZdsZrjgbYNiDsWQML36huJVrF8DAroCqMYpJXJxRhw==, tarball: https://npm.jsr.io/~/11/@jsr/evex__rakutenai/0.1.11.tgz}
 
   '@sapphire/async-queue@1.5.5':
     resolution: {integrity: sha512-cvGzxbba6sav2zZkH8GPf2oGk9yYoD5qrNWdu9fRehifgnFZJMV+nuy2nON2roRO4yQQ+v7MK/Pktl/HgfsUXg==}
@@ -115,8 +115,8 @@ packages:
     resolution: {integrity: sha512-gBLkYIlEnSp8pFbT64yFgGE6UIB9tAkhukC23PmMDCe5Nd+cRqKxSjw5y54MK2AZMgZfJWMaNE4nYUHgi1XEOw==}
     engines: {node: '>=18.17'}
 
-  ws@8.18.3:
-    resolution: {integrity: sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg==}
+  ws@8.19.0:
+    resolution: {integrity: sha512-blAT2mjOEIi0ZzruJfIhb3nps74PRWTCz1IjglWEEpQl5XS/UNama6u2/rjFkDDouqr4L67ry+1aGIALViWjDg==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -173,12 +173,12 @@ snapshots:
       '@vladfrangu/async_event_emitter': 2.4.7
       discord-api-types: 0.38.37
       tslib: 2.8.1
-      ws: 8.18.3
+      ws: 8.19.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@jsr/evex__rakutenai@0.1.10': {}
+  '@jsr/evex__rakutenai@0.1.11': {}
 
   '@sapphire/async-queue@1.5.5': {}
 
@@ -240,4 +240,4 @@ snapshots:
 
   undici@6.21.3: {}
 
-  ws@8.18.3: {}
+  ws@8.19.0: {}
