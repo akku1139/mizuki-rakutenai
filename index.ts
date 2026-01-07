@@ -77,6 +77,9 @@ const chatStore: Map<string, {
   q: Promise<void>,
 }> = new Map();
 
+let aiWaitingJobs = 0;
+let aiProcessingJobs = 0;
+
 const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message> => {
   const parts = splitLongString(text
     .replace(/^####+ /gm, '### ')
@@ -110,7 +113,7 @@ client.on('messageCreate', async m => {
       return;
     }
     if(m.content === '<@1379433738143924284> chatlist') {
-      await m.reply(`\`\`\`\n${JSON.stringify(Array.from(chatStore.keys()), null, 2)}\n\`\`\``);
+      await m.reply(`joob queue: \`{ waiting: ${aiWaitingJobs}, processing : ${aiProcessingJobs} }\`\ncontext list:\n\`\`\`json\n${JSON.stringify(Array.from(chatStore.keys()), null, 2)}\n\`\`\``);
       return;
     }
     let rep: string = ''; // リプとかシステムプロンプトとか
@@ -135,7 +138,10 @@ client.on('messageCreate', async m => {
     });
 
     try {
+      ++aiWaitingJobs;
       await previousTask;
+      --aiWaitingJobs;
+      ++aiProcessingJobs;
       console.info(m.id, ': start');
 
       m.channel.sendTyping();
@@ -253,6 +259,7 @@ client.on('messageCreate', async m => {
       console.error(m.id, ': An error occurred during processing\n', e);
       await m.reply(`ERROR:\n\`\`\`\n${e}\n\`\`\``);
     } finally {
+      --aiProcessingJobs;
       resolveNext();
     }
   }
