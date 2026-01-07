@@ -149,7 +149,7 @@ client.on('messageCreate', async m => {
         }
       }
 
-      const input = (rep + `from: ${m.member?.displayName ?? m.author.displayName} (${m.author.username}, ${m.author.id})` + m.content).replaceAll('<@1379433738143924284>', '');
+      const input = (rep + `from: ${m.member?.displayName ?? m.author.displayName} (${m.author.username}, ${m.author.id})\n` + m.content).replaceAll('<@1379433738143924284>', '');
       console.log(m.id, input);
 
       const res = chat.t.sendMessage({
