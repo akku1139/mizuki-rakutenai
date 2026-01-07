@@ -109,6 +109,10 @@ client.on('messageCreate', async m => {
       await m.reply('chat context destroyed.');
       return;
     }
+    if(m.content === '<@1379433738143924284> chatlist') {
+      await m.reply(`\`\`\`\n${JSON.stringify(chatStore.keys, null, 2)}\n\`\`\``);
+      return;
+    }
     let rep: string = ''; // リプとかシステムプロンプトとか
     const chat = chatStore.get(m.channelId) ?? await (async () => {
       const newChat = {
