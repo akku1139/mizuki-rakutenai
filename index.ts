@@ -56,6 +56,19 @@ client.on('ready', readyClient => {
   console.info(`Logged in as ${readyClient.user.tag}!`);
 });
 
+const getFileName = (urlString: string): string => {
+  try {
+    const url = new URL(urlString);
+    // パス（/media/G53TrWRbYAEXaOP.jpg:medium）の最後のセグメントを取得
+    const lastSegment = url.pathname.split('/').pop() || '';
+
+    // コロン（:）以降が含まれる場合は、それより前を抽出
+    return lastSegment.split(':')[0];
+  } catch (error) {
+    console.error("Invalid URL", error);
+    return '';
+  }
+};
 
 /// AI feature
 
@@ -141,7 +154,10 @@ client.on('messageCreate', async m => {
                 files.push(...await Promise.all([
                   ...fm.attachments.map(a => a),
                   ...(fm.embeds.length === 0 ? [] : fm.embeds.filter(a => a.image?.url)
-                    .map((a, j) => ({ url: a.image!.url, proxyURL: a.image?.proxyURL ?? a.image!.url, name: `embed-${i}-${j}` }))
+                    .map((a, j) => ({
+                      url: a.image!.url, proxyURL: a.image?.proxyURL ?? a.image!.url,
+                      name: getFileName(a.image!.url) || `embed-${i}-${j}.png`, // 適当
+                    }))
                   ),
                 ].map(async f => {
                   console.log('file:', f.url, f.name);
