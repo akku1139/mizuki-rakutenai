@@ -110,7 +110,7 @@ client.on('messageCreate', async m => {
       return;
     }
     if(m.content === '<@1379433738143924284> chatlist') {
-      await m.reply(`\`\`\`\n${JSON.stringify(chatStore.keys, null, 2)}\n\`\`\``);
+      await m.reply(`\`\`\`\n${JSON.stringify(Array.from(chatStore.keys()), null, 2)}\n\`\`\``);
       return;
     }
     let rep: string = ''; // リプとかシステムプロンプトとか
