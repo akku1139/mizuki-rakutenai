@@ -136,8 +136,14 @@ client.on('messageCreate', async m => {
             (await m.channel.messages.fetch({ around: m.reference.messageId, limit: 10 }))
               .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
               .filter(fm => fm.author.id === ref?.author.id) // 非連続でも拾うけどいいよね
-              .map(async (fm) => {
-                files.push(...await Promise.all(fm.attachments.map(async f => {
+              .map(async (fm, i) => {
+                // 副作用
+                files.push(...await Promise.all([
+                  ...fm.attachments.map(a => a),
+                  ...(fm.embeds.length === 0 ? [] : fm.embeds.filter(a => a.image?.url)
+                    .map((a, j) => ({ url: a.image!.url, proxyURL: a.image?.proxyURL ?? a.image!.url, name: `embed-${i}-${j}` }))
+                  ),
+                ].map(async f => {
                   console.log('file:', f.url, f.name);
                   const file = await createFileFromUrl(f.proxyURL, f.name);
                   return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
