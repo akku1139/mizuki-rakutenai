@@ -96,12 +96,19 @@ client.on('messageCreate', async m => {
       await m.reply('chat context destroyed.');
       return;
     }
+    let rep: string = ''; // リプとかシステムプロンプトとか
     const chat = chatStore.get(m.channelId) ?? await (async () => {
       const newChat = {
         t: await (await User.create()).createThread(),
         q: Promise.resolve(),
       };
       chatStore.set(m.channelId, newChat);
+      rep = `===== 指示 (重要) =====
+あなたはDiscord上で活動するAIエージェントです。
+あなたのユーザーIDは 1379433738143924284 です。
+レスポンスは簡潔にし、長文は避けてください。
+==========
+`;
       return newChat;
     })();
     const previousTask = chat.q;
@@ -122,11 +129,10 @@ client.on('messageCreate', async m => {
         return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
       }));
 
-      let rep: string = '';
       if(m.reference?.messageId) {
         const ref = await m.channel.messages.fetch(m.reference.messageId).catch(console.error);
         if(ref && ref?.author.id !== '1379433738143924284') {
-          rep = (await Promise.all(
+          rep = `> from: ${ref.member?.displayName ?? ref.author.displayName} (${ref.author.username}, ${ref.author.id}) >\n` +(await Promise.all(
             (await m.channel.messages.fetch({ around: m.reference.messageId, limit: 10 }))
               .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
               .filter(fm => fm.author.id === ref?.author.id) // 非連続でも拾うけどいいよね
@@ -136,14 +142,14 @@ client.on('messageCreate', async m => {
                   const file = await createFileFromUrl(f.proxyURL, f.name);
                   return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
                 })) );
-                return fm.content.replace(/^/gm, "> ") + (ref.embeds ? ('\n>embed> ' + JSON.stringify(ref.embeds) + '\n') : '');
+                return fm.content.replace(/^/gm, "> ") + (ref.embeds ? ('\n> embed > ' + JSON.stringify(ref.embeds) + '\n') : '');
               })
           )).join('\n');
           rep += '\n\n';
         }
       }
 
-      const input = (rep + m.content).replaceAll('<@1379433738143924284>', '');
+      const input = (rep + `from: ${m.member?.displayName ?? m.author.displayName} (${m.author.username}, ${m.author.id})` + m.content).replaceAll('<@1379433738143924284>', '');
       console.log(m.id, input);
 
       const res = chat.t.sendMessage({
