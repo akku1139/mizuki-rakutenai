@@ -218,7 +218,7 @@ client.on('messageCreate', async m => {
             break;
 
           case 'error':
-            await m.channel.send(`ERROR:\n\`\`\`json\n${JSON.stringify(gen, null, 2)}\n\`\`\``);
+            await m.reply(`ERROR:\n\`\`\`json\n${JSON.stringify(gen, null, 2)}\n\`\`\``);
             break;
 
           default:
@@ -231,6 +231,7 @@ client.on('messageCreate', async m => {
       await sendMessage(text, m, first);
     } catch(e) {
       console.error(m.id, ': An error occurred during processing\n', e);
+      await m.reply(`ERROR:\n\`\`\`\n${e}\n\`\`\``);
     } finally {
       resolveNext();
     }
