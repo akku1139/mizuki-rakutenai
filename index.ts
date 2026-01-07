@@ -138,11 +138,12 @@ client.on('messageCreate', async m => {
                 })) );
                 return fm.content.replace(/^/gm, "> ");
               })
-          )).join('\n');
+          )).join('\n')
+          rep += '\n\n';
         }
       }
 
-      const input = (rep + '\n\n' + m.content).replaceAll('<@1379433738143924284>', '');
+      const input = (rep + m.content).replaceAll('<@1379433738143924284>', '');
       console.log(m.id, input);
 
       const res = chat.t.sendMessage({
