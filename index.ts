@@ -125,7 +125,7 @@ client.on('messageCreate', async m => {
       let rep: string = '';
       if(m.reference?.messageId) {
         const ref = await m.channel.messages.fetch(m.reference.messageId).catch(console.error);
-        if(ref?.author.id !== '1379433738143924284') {
+        if(ref && ref?.author.id !== '1379433738143924284') {
           rep = (await Promise.all(
             (await m.channel.messages.fetch({ around: m.reference.messageId, limit: 10 }))
               .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
@@ -136,9 +136,9 @@ client.on('messageCreate', async m => {
                   const file = await createFileFromUrl(f.proxyURL, f.name);
                   return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
                 })) );
-                return fm.content.replace(/^/gm, "> ");
+                return fm.content.replace(/^/gm, "> ") + (ref.embeds ? ('\n>embed>' + JSON.stringify(ref.embeds) + '\n') : '');
               })
-          )).join('\n')
+          )).join('\n');
           rep += '\n\n';
         }
       }
