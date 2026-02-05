@@ -352,6 +352,7 @@ client.on('messageCreate', async m => {
 
   let toSend = '';
   ankas.forEach((a, k) => {
+    if(a.count >= a.target) { ankas.delete(k); return; }
     if(m.channelId !== a.msg.channelId || a.target !== ++a.count) return;
     ankas.delete(k);
     toSend += `[>>[${a.target}](${a.msg.url}) <@${a.msg.author.id}>\n`;
@@ -361,7 +362,7 @@ client.on('messageCreate', async m => {
   let i = 0;
   m.content.match(/>>\d+/g)?.forEach((a) => {
     const t = Number(a.slice(2));
-    if(t > 200) return;
+    if(t === 0 || t > 200) return;
     ankas.set(`${m.id}+${i}`, { msg: m, target: t, count: 0 });
     ++i;
   });
