@@ -276,7 +276,7 @@ let hasNewData: boolean = false;
 let lastTxCount: number = 0;
 let watch114514channel: SendableChannels;
 client.on('ready', async (c) => {
-  const ch = await c.channels.fetch('1458031541652557935');
+  const ch = await c.channels.fetch('1468910632119308289');
   if(!ch || !ch.isSendable()) throw new Error('failed to get 114514 channel');
   watch114514channel = ch;
 });
