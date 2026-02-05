@@ -355,7 +355,7 @@ client.on('messageCreate', async m => {
     if(a.count >= a.target) { ankas.delete(k); return; }
     if(m.channelId !== a.msg.channelId || a.target !== ++a.count) return;
     ankas.delete(k);
-    toSend += `[>>[${a.target}](${a.msg.url}) <@${a.msg.author.id}>\n`;
+    toSend += `[>>${a.target}](${a.msg.url}) <@${a.msg.author.id}>\n`;
   });
   if(toSend !== '') m.reply("安価されました\n" + toSend);
 
