@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel, type SendableChannels } from 'discord.js';
+import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel, type SendableChannels, type Snowflake } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
 import { MexcWebsocketClient } from './mexc.ts';
 
@@ -331,5 +331,41 @@ setInterval(async () => {
 
 mexc.subscribe(['spot@public.aggre.deals.v3.api.pb@100ms@114514USDT']);
 mexc.connect();
+
+
+/// anka feature
+const ankas = new Map<Snowflake, { msg: Message, target: number, count: number }>();
+
+client.on('messageCreate', async m => {
+  if(m.author.bot) return;
+
+  if(m.content === '<@1379433738143924284> anka') {
+    const ls: Array<string> = [];
+    ankas.forEach(a => {
+      if(m.channelId !== a.msg.channelId) return;
+      ls.push(`>>${a.target} (${a.count}/${a.target}) ${a.msg.url}`);
+    });
+    m.reply(ls.length === 0 ? 'このチャンネルで進行中の安価はありません' : ls.join('\n'));
+
+    return;
+  }
+
+  let toSend = '';
+  ankas.forEach((a, k) => {
+    if(m.channelId !== a.msg.channelId || a.target !== ++a.count) return;
+    ankas.delete(k);
+    toSend += `[>>[${a.target}](${a.msg.url}) <@${a.msg.author.id}>\n`;
+  });
+  if(toSend !== '') m.reply("安価されました\n" + toSend);
+
+  let i = 0;
+  m.content.match(/>>\d+/g)?.forEach((a) => {
+    const t = Number(a.slice(2));
+    if(t > 200) return;
+    ankas.set(`${m.id}+${i}`, { msg: m, target: t, count: 0 });
+    ++i;
+  });
+});
+
 
 client.login(process.env['DISCORD_TOKEN']);
