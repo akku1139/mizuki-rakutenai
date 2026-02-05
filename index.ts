@@ -107,12 +107,12 @@ client.on('messageCreate', async m => {
     && (m.channel instanceof TextChannel || m.channel instanceof ThreadChannel)
     && m.guild !== null
   ) {
-    if(m.content === '<@1379433738143924284> clear') {
+    if(m.content === '<@1379433738143924284> clear' || m.content === '=clear') {
       chatStore.delete(m.channelId);
       await m.reply('chat context destroyed.');
       return;
     }
-    if(m.content === '<@1379433738143924284> chatlist') {
+    if(m.content === '=chatlist') {
       await m.reply(`joob queue: \`{ waiting: ${aiWaitingJobs}, processing : ${aiProcessingJobs} }\`\ncontext list:\n\`\`\`json\n${JSON.stringify(Array.from(chatStore.keys()), null, 2)}\n\`\`\``);
       return;
     }
@@ -339,7 +339,7 @@ const ankas = new Map<Snowflake, { msg: Message, target: number, count: number }
 client.on('messageCreate', async m => {
   if(m.author.bot) return;
 
-  if(m.content === '<@1379433738143924284> anka') {
+  if(m.content === '=anka') {
     const ls: Array<string> = [];
     ankas.forEach(a => {
       if(m.channelId !== a.msg.channelId) return;
