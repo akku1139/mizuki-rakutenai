@@ -107,12 +107,12 @@ client.on('messageCreate', async m => {
     && (m.channel instanceof TextChannel || m.channel instanceof ThreadChannel)
     && m.guild !== null
   ) {
-    if(m.content === '<@1379433738143924284> clear' || m.content === '=clear') {
+    if(m.content === '<@1379433738143924284> clear') {
       chatStore.delete(m.channelId);
       await m.reply('chat context destroyed.');
       return;
     }
-    if(m.content === '=chatlist') {
+    if(m.content === '<@1379433738143924284> chatlist') {
       await m.reply(`joob queue: \`{ waiting: ${aiWaitingJobs}, processing : ${aiProcessingJobs} }\`\ncontext list:\n\`\`\`json\n${JSON.stringify(Array.from(chatStore.keys()), null, 2)}\n\`\`\``);
       return;
     }
