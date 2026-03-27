@@ -241,7 +241,13 @@ client.on('messageCreate', async m => {
 
           case 'tool-call':
             m.channel.sendTyping();
-            await m.channel.send('-# function call...');
+            break;
+
+          case 'tool-call-detail':
+            await sendMessage(text, m, first);
+            text = '';
+            first = false;
+            await m.channel.send(`-# ${gen.data.description} (${gen.data.name})`);
             break;
 
           case 'error':
