@@ -3,6 +3,11 @@
 import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel, type SendableChannels, type Snowflake } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
 import { MexcWebsocketClient } from './mexc.ts';
+import process from 'node:process';
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('unhandledRejection', reason, promise);
+});
 
 const client = new Client({ intents: [
   GatewayIntentBits.Guilds,
