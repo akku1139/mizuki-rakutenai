@@ -244,9 +244,11 @@ client.on('messageCreate', async m => {
             break;
 
           case 'tool-call-detail':
-            await sendMessage(text, m, first);
-            text = '';
-            first = false;
+            if(text) {
+              await sendMessage(text, m, first);
+              text = '';
+              first = false;
+            }
             await m.channel.send(`-# ${gen.data.description} (${gen.data.name})`);
             break;
 
