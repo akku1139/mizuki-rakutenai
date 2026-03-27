@@ -35,6 +35,15 @@ export const splitLongString = (text: string, len: number): Array<string> => {
   return result; // 空文字列をfilterしてあげればいい
 };
 
+const isEffectivelyEmpty = (text: string): boolean => {
+  // 正規表現の解説:
+  // [ \u3000\n\r] : 半角スペース、全角スペース(\u3000)、改行(\n)、復帰(\r)
+  // /g : 文字列全体を対象（グローバルマッチ）
+  const cleanedText = text.replace(/[ 　\n\r]/g, '');
+
+  return cleanedText.length === 0;
+};
+
 const createFileFromUrl = async (url: string, fileName: string): Promise<File> => {
   // 1. URLからデータを取得
   const response = await fetch(url);
@@ -221,7 +230,7 @@ client.on('messageCreate', async m => {
             console.log('image:', gen.url);
             m.channel.sendTyping();
 
-            if(text) {
+            if(!isEffectivelyEmpty(text)) {
               await sendMessage(text, m, first);
               text = '';
               first = false;
@@ -240,11 +249,13 @@ client.on('messageCreate', async m => {
             break;
 
           case 'tool-call':
+            console.log('function call:');
             m.channel.sendTyping();
             break;
 
           case 'tool-call-detail':
-            if(text) {
+            console.log('fc:', gen);
+            if(!isEffectivelyEmpty(text)) {
               await sendMessage(text, m, first);
               text = '';
               first = false;
