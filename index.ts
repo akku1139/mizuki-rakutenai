@@ -405,7 +405,7 @@ const fluxer = new Client({
     // do not add / at the last
     api: 'https://api.fluxer.app',
     version: '1',
-    cdn: 'https://fluxerusercontent.com/'
+    cdn: 'https://fluxerusercontent.com'
   },
   ws: {
     version: 1,
@@ -415,8 +415,15 @@ const fluxer = new Client({
 const discordWHID = '1493988795849113723';
 const discordWH = new WebhookClient({ id: discordWHID, token: process.env['DISCORD_WH_TOKEN']! });
 const discordTargetCh = '1493982933025816576';
+
 const fluxerWHID = '1493982452663773810';
-const fluxerWH = new WebhookClient({ id: fluxerWHID, token: process.env['FLUXER_WH_TOKEN']! });
+const fluxerWH = new WebhookClient({ id: fluxerWHID, token: process.env['FLUXER_WH_TOKEN']! }, {
+ rest: {
+    api: 'https://api.fluxer.app',
+    version: '1',
+    cdn: 'https://fluxerusercontent.com'
+  },
+});
 const fluxerTargetCh = '1493973306367330573';
 
 client.on('messageCreate', async m => {
