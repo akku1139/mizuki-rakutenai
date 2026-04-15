@@ -416,7 +416,7 @@ const discordWH = new WebhookClient({ id: discordWHID, token: process.env['DISCO
 const discordTargetCh = '1493982933025816576';
 const fluxerWHID = '1493982452663773810';
 const fluxerWH = new WebhookClient({ id: fluxerWHID, token: process.env['FLUXER_WH_TOKEN']! });
-const fluxerTargetCh = '1493971310876907609';
+const fluxerTargetCh = '1493973306367330573';
 
 client.on('messageCreate', async m => {
   if(m.channelId !== discordTargetCh
