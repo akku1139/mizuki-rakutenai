@@ -412,10 +412,10 @@ const fluxer = new Client({
 });
 
 const discordWHID = '1493988795849113723';
-const discordWH = new WebhookClient({ url: process.env['DISCORD_WH']! });
+const discordWH = new WebhookClient({ id: discordWHID, token: process.env['DISCORD_WH_TOKEN']! });
 const discordTargetCh = '1493982933025816576';
 const fluxerWHID = '1493982452663773810';
-const fluxerWH = new WebhookClient({ url: process.env['FLUXER_WH']! });
+const fluxerWH = new WebhookClient({ id: fluxerWHID, token: process.env['FLUXER_WH_TOKEN']! });
 const fluxerTargetCh = '1493971310876907609';
 
 client.on('messageCreate', async m => {
