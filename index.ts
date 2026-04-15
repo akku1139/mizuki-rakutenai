@@ -460,3 +460,4 @@ fluxer.on('messageCreate', async m => {
 });
 
 client.login(process.env['DISCORD_TOKEN']);
+fluxer.login(process.env['FLUXER_TOKEN']);
