@@ -421,6 +421,7 @@ const fluxerTargetCh = '1493973306367330573';
 client.on('messageCreate', async m => {
   if(m.channelId !== discordTargetCh
     || m.author.id === discordWHID) return;
+  console.log('sending a message to fluxer:', m.id);
   await fluxerWH.send({
     allowedMentions: {
       parse: [], // とりあえずメンション無し
@@ -435,9 +436,14 @@ client.on('messageCreate', async m => {
   });
 });
 
+fluxer.on('clientReady', readyClient => {
+  console.info(`Logged in to fluxer as ${readyClient.user.tag}!`);
+});
+
 fluxer.on('messageCreate', async m => {
   if(m.channelId !== fluxerTargetCh
     || m.author.id === fluxerWHID) return;
+  console.log('sending a message to discord:', m.id);
   await discordWH.send({
     allowedMentions: {
       parse: [], // とりあえずメンション無し
