@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel, type SendableChannels, type Snowflake } from 'discord.js';
+import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel, type SendableChannels, type Snowflake, WebhookClient } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
 import { MexcWebsocketClient } from './mexc.ts';
 import process from 'node:process';
@@ -392,5 +392,65 @@ client.on('messageCreate', async m => {
   });
 });
 
+
+// Fluxer sync
+const fluxer = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
+  ],
+  rest: {
+    api: 'https://web.fluxer.app/api/',
+    version: '1',
+    cdn: 'https://fluxerusercontent.com/'
+  },
+  ws: {
+    version: 1,
+  },
+});
+
+const discordWHID = '1493988795849113723';
+const discordWH = new WebhookClient({ url: process.env['DISCORD_WH']! });
+const discordTargetCh = '1493982933025816576';
+const fluxerWHID = '1493982452663773810';
+const fluxerWH = new WebhookClient({ url: process.env['FLUXER_WH']! });
+const fluxerTargetCh = '1493971310876907609';
+
+client.on('messageCreate', async m => {
+  if(m.channelId !== discordTargetCh
+    || m.author.id === discordWHID) return;
+  await fluxerWH.send({
+    allowedMentions: {
+      parse: [], // とりあえずメンション無し
+    },
+    username: `${m.member?.nickname ?? m.author.displayName}#Discord`,
+    avatarURL: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
+    content: m.content,
+    embeds: m.embeds,
+    files: [...m.attachments.values()],
+    tts: m.tts,
+    withComponents: false,
+  });
+});
+
+fluxer.on('messageCreate', async m => {
+  if(m.channelId !== fluxerTargetCh
+    || m.author.id === fluxerWHID) return;
+  await discordWH.send({
+    allowedMentions: {
+      parse: [], // とりあえずメンション無し
+    },
+    username: `${m.member?.nickname ?? m.author.displayName}#Fluxer`,
+    avatarURL: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
+    content: m.content,
+    embeds: m.embeds,
+    files: [...m.attachments.values()],
+    tts: m.tts,
+    withComponents: false,
+    threadId: '1493982933025816576',
+  });
+});
 
 client.login(process.env['DISCORD_TOKEN']);
