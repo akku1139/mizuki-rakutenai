@@ -402,7 +402,7 @@ const fluxer = new Client({
     GatewayIntentBits.GuildMembers,
   ],
   rest: {
-    api: 'https://web.fluxer.app/api/',
+    api: 'https://api.fluxer.app/',
     version: '1',
     cdn: 'https://fluxerusercontent.com/'
   },
