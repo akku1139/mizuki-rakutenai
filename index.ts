@@ -66,7 +66,7 @@ client.on('error', async err => {
   console.error(err.stack ?? err.name + '\n' + err.message);
 });
 
-client.on('ready', readyClient => {
+client.on('clientReady', readyClient => {
   console.info(`Logged in as ${readyClient.user.tag}!`);
 });
 
