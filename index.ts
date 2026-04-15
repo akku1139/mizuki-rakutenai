@@ -426,6 +426,11 @@ const fluxerWH = new WebhookClient({ id: fluxerWHID, token: process.env['FLUXER_
 });
 const fluxerTargetCh = '1493973306367330573';
 
+// TODO:
+// m.type === MessageType.UserJoin
+// emoji
+// mentions
+
 client.on('messageCreate', async m => {
   if(m.channelId !== discordTargetCh
     || m.author.id === discordWHID) return;
@@ -438,7 +443,8 @@ client.on('messageCreate', async m => {
     avatarURL: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
     content: m.content,
     embeds: m.embeds,
-    files: [...m.attachments.values()],
+    // これダメ
+    //files: [...m.attachments.values()],
     tts: m.tts,
     withComponents: false,
   });
