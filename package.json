@@ -8,7 +8,7 @@
   "author": "",
   "packageManager": "pnpm@10.25.0",
   "dependencies": {
-    "@evex/rakutenai": "jsr:^0.1.16",
+    "@evex/rakutenai": "jsr:^0.1.17",
     "discord.js": "^14.26.4",
     "google-protobuf": "^4.0.2"
   },
