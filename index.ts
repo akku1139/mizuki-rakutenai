@@ -496,8 +496,7 @@ client.on('messageDelete', async m => {
 });
 
 client.on('messageUpdate', async (o, n) => {
-  if (o.guildId !== evexID) return;
-  if (o.author?.id === logwh.id) return;
+  if (o.guildId !== evexID || o.author?.id === logwh.id || o.content === n.content) return;
   await logwh.send({
     embeds: [{
       description: `:pencil2: **Message sent by <@${o.author?.id}> edited in <#${o.channelId}>.**  [Jump to Message](${o.url})`,
