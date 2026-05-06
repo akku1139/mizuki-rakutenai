@@ -170,7 +170,7 @@ client.on('messageCreate', async m => {
       if(m.reference?.messageId) {
         const ref = await m.channel.messages.fetch(m.reference.messageId).catch(console.error);
         if(ref && ref?.author.id !== '1379433738143924284') {
-          rep = `> from: ${ref.member?.displayName ?? ref.author.displayName} (${ref.author.username}, ${ref.author.id}) >\n` +(await Promise.all(
+          rep += `> from: ${ref.member?.displayName ?? ref.author.displayName} (${ref.author.username}, ${ref.author.id}) >\n` +(await Promise.all(
             (await m.channel.messages.fetch({ around: m.reference.messageId, limit: 10 }))
               .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
               .filter(fm => fm.author.id === ref?.author.id) // 非連続でも拾うけどいいよね
