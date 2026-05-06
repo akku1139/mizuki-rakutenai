@@ -479,8 +479,8 @@ const logwh = new WebhookClient({ url: process.env['DISCORD_LOG_WEBHOOK']! });
 const evexID = '1255359848644608035';
 
 client.on('messageDelete', async m => {
-  if (m.channelId !== evexID) return;
-  logwh.send({
+  if (m.guildId !== evexID) return;
+  await logwh.send({
     embeds: [{
       description: `:wastebasket: **Message sent by <@${m.author?.id}> deleted in <#${m.channelId}>.**\n${m.content}`,
       footer: {
@@ -497,10 +497,10 @@ client.on('messageDelete', async m => {
 });
 
 client.on('messageUpdate', async (o, n) => {
-  if (o.channelId !== evexID) return;
-  logwh.send({
+  if (o.guildId !== evexID) return;
+  await logwh.send({
     embeds: [{
-      description: ":pencil2: **Message sent by <@1094920331027820544> edited in <#1437420093259907175>.**  [Jump to Message](https://discord.com/channels/1255359848644608035/1437420093259907175/1499006593969160202)",
+      description: `:pencil2: **Message sent by <@${o.author?.id}> edited in <#${o.channelId}>.**  [Jump to Message](${o.url})`,
       footer: {
         text: "Evex Developers",
       },
