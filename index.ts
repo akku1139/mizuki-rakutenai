@@ -469,7 +469,6 @@ fluxer.on('messageCreate', async m => {
     files: [...m.attachments.values()],
     tts: m.tts,
     withComponents: false,
-    // threadId: '1493982933025816576',
   });
 });
 
