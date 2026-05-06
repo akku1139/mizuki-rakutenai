@@ -412,9 +412,9 @@ const fluxer = new Client({
   },
 });
 
-const discordWHID = '1493988795849113723';
+const discordWHID = '1501483510886825986';
 const discordWH = new WebhookClient({ id: discordWHID, token: process.env['DISCORD_WH_TOKEN']! });
-const discordTargetCh = '1493982933025816576';
+const discordTargetCh = '1437420093259907175';
 
 const fluxerWHID = '1493982452663773810';
 const fluxerWH = new WebhookClient({ id: fluxerWHID, token: process.env['FLUXER_WH_TOKEN']! }, {
