@@ -526,6 +526,42 @@ client.on('messageUpdate', async (o, n) => {
   });
 });
 
+client.on('guildMemberAdd', async m => {
+  if (m.guild.id !== evexID) return;
+  await logwh.send({
+    embeds: [{
+      description: `:airplane_arriving: <@${m.user.id}> joined Evex Developers`,
+      footer: {
+        text: "Evex Developers",
+      },
+      author: {
+        name: `${m.user.displayName} (${m.user.username})`,
+        icon_url: m.user.avatarURL() ?? undefined,
+      },
+      timestamp: new Date().toISOString(),
+      color: 0x21d3c2,
+    }],
+  });
+});
+
+client.on('guildMemberRemove', async m => {
+  if (m.guild.id !== evexID) return;
+  await logwh.send({
+    embeds: [{
+      description: `:airplane_departure: <@${m.user.id}> left Evex Developers`,
+      footer: {
+        text: "Evex Developers",
+      },
+      author: {
+        name: `${m.user.displayName} (${m.user.username})`,
+        icon_url: m.user.avatarURL() ?? undefined,
+      },
+      timestamp: new Date().toISOString(),
+      color: 0xd3c821,
+    }],
+  });
+});
+
 
 client.login(process.env['DISCORD_TOKEN']);
 fluxer.login(process.env['FLUXER_TOKEN']);
