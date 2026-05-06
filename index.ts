@@ -513,12 +513,12 @@ client.on('messageUpdate', async (o, n) => {
       fields: [
         {
           name: "**Old**",
-          value: '```'+o.content+'```',
+          value: '```md\n'+o.content+'\n```',
           inline: false,
         },
         {
           name: "**New**",
-          value: '```'+n.content+'```',
+          value: '```md\n'+n.content+'\n```',
           inline: false,
         }
       ],
