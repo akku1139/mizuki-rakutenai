@@ -94,15 +94,12 @@ const chatStore: Map<string, {
 let aiWaitingJobs = 0;
 let aiProcessingJobs = 0;
 
-const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message> => {
-  const parts = splitLongString(text
-    .replace(/^####+ /gm, '### ')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, "[$1](<$2>)")
-  , 1500);
+const MAX_LINES = 5;
 
+const sendParts = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message> => {
   let sent: Message = m; // ここゴミ
 
-  for(const part of parts) {
+  for(const part of splitLongString(text, 1500)) {
     if(first) {
       sent = await m.reply(part);
       first = false;
@@ -112,6 +109,35 @@ const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, 
   }
 
   return sent;
+}
+
+const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message> => {
+  const normalized = text
+    .replace(/^####+ /gm, '### ')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, "[$1](<$2>)");
+
+  const lines = normalized.split('\n');
+
+  // can't nest threads, so keep inline when already inside one
+  if(lines.length <= MAX_LINES || m.channel.isThread()) {
+    return sendParts(normalized, m, first);
+  }
+
+  const head = lines.slice(0, MAX_LINES).join('\n');
+  const tail = lines.slice(MAX_LINES).join('\n');
+
+  const main = await sendParts(head, m, first);
+
+  const threadName = (lines.find(l => !isEffectivelyEmpty(l)) ?? '続き').slice(0, 80);
+  const thread = await main.startThread({ name: threadName });
+  await main.edit(`${main.content}\n続き: ${thread.url}`);
+
+  for(const part of splitLongString(tail, 1500)) {
+    if(isEffectivelyEmpty(part)) continue;
+    await thread.send(part);
+  }
+
+  return main;
 }
 
 client.on('messageCreate', async m => {
