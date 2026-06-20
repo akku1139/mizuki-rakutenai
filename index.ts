@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel, type SendableChannels, type Snowflake, WebhookClient } from 'discord.js';
+import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel, type SendableChannels, type Snowflake, WebhookClient, AttachmentBuilder } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
 import { MexcWebsocketClient } from './mexc.ts';
 import process from 'node:process';
+import { MiQ } from './miq.ts';
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('unhandledRejection', reason, promise);
@@ -562,6 +563,16 @@ client.on('guildMemberRemove', async m => {
   });
 });
 
+
+/// MiQ feature
+client.on('messageCreate', async m => {
+  if (!(m.content === 'めいく' || m.content === 'make')) return;
+  if (!m.reference?.messageId) return;
+  const replied = await m.channel.messages.fetch(m.reference.messageId);
+  const miq = new MiQ().setFromMessage(replied);
+  const response = await miq.generate();
+  await m.reply({ files: [new AttachmentBuilder(response, { name: 'miq.png' })]});
+});
 
 client.login(process.env['DISCORD_TOKEN']);
 fluxer.login(process.env['FLUXER_TOKEN']);
