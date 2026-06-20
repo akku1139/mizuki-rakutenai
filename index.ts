@@ -569,13 +569,7 @@ client.on('messageCreate', async m => {
   if (!(m.content === 'めいく' || m.content === 'make')) return;
   if (!m.reference?.messageId) return;
   const replied = await m.channel.messages.fetch(m.reference.messageId);
-  const miq = new MiQ()
-    .setFromMessage(replied)
-    .setText(m.content)
-    .setAvatar(m.member?.avatarURL() ?? m.author.avatarURL())
-    .setUsername(m.author.username)
-    .setDisplayname(m.member?.displayName ?? m.author.displayName)
-    .setColor(false);
+  const miq = new MiQ().setFromMessage(replied).setColor(true);
   const response = await miq.generate();
   await m.reply({ files: [new AttachmentBuilder(response, { name: 'miq.png' })]});
 });
