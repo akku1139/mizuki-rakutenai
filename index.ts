@@ -568,6 +568,7 @@ client.on('guildMemberRemove', async m => {
 client.on('messageCreate', async m => {
   if (!(m.content === 'めいく' || m.content === 'make')) return;
   if (!m.reference?.messageId) return;
+  m.channel.sendTyping();
   const replied = await m.channel.messages.fetch(m.reference.messageId);
   const miq = new MiQ().setFromMessage(replied).setColor(true);
   const response = await miq.generate();
