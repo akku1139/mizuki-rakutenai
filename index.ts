@@ -471,7 +471,7 @@ fluxer.on('clientReady', readyClient => {
 fluxer.on('messageCreate', async m => {
   const whInfo = whMapFluxer[m.channelId];
   if (!whInfo || m.author.id === whInfo.whID) {
-    if (m.content.startsWith('=syncsetup ')) {
+    if (m.author.id === '1493964990916384451' && m.content.startsWith('=syncsetup ')) {
       const whSrc = await (m.channel as TextChannel).createWebhook({ name: 'Fluxer Sync' });
       const distCh = m.content.split(' ')[1];
       const whDist = await ((await client.channels.fetch(distCh))! as TextChannel).createWebhook({ name: 'Fluxer Sync' });
