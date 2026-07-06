@@ -478,7 +478,8 @@ fluxer.on('messageCreate', async m => {
       whMapFluxer[m.channelId] = { whID: whSrc.id, whToken: whSrc.token, targetClannelID: distCh };
       whMapDiscord[distCh] = { whID: whDist.id, whToken: whDist.token, targetClannelID: m.channelId };
       await saveWhMap();
-    } else return;
+    }
+    return;
   }
   console.log('sending a message to discord:', m.id);
   const targetInfo = whMapDiscord[whInfo.targetClannelID];
