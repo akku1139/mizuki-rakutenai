@@ -408,6 +408,10 @@ const whMapDiscord = JSON.parse((await fs.readFile('./data/fluxersync_discord.js
   whToken: string,
   targetClannelID: string, // relation
 }>;
+const saveWhMap = async () => {
+  await fs.writeFile('./data/fluxersync_fluxer.json', JSON.stringify(whMapFluxer));
+  await fs.writeFile('./data/fluxersync_discord.json', JSON.stringify(whMapDiscord));
+};
 
 const fluxer = new Client({
   intents: [
@@ -466,7 +470,16 @@ fluxer.on('clientReady', readyClient => {
 
 fluxer.on('messageCreate', async m => {
   const whInfo = whMapFluxer[m.channelId];
-  if(!whInfo || m.author.id === whInfo.whID) return;
+  if (!whInfo || m.author.id === whInfo.whID) {
+    if (m.content.startsWith('=syncsetup ')) {
+      const whSrc = await (m.channel as TextChannel).createWebhook({ name: 'Fluxer Sync' });
+      const distCh = m.content.split(' ')[1];
+      const whDist = await ((await client.channels.fetch(distCh))! as TextChannel).createWebhook({ name: 'Fluxer Sync' });
+      whMapFluxer[m.channelId] = { whID: whSrc.id, whToken: whSrc.token, targetClannelID: distCh };
+      whMapDiscord[distCh] = { whID: whDist.id, whToken: whDist.token, targetClannelID: m.channelId };
+      await saveWhMap();
+    } else return;
+  }
   console.log('sending a message to discord:', m.id);
   const targetInfo = whMapDiscord[whInfo.targetClannelID];
   const discordWH = new WebhookClient({ id: targetInfo.whID, token: targetInfo.whToken });
