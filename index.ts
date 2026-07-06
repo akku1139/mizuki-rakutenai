@@ -457,9 +457,7 @@ client.on('messageCreate', async m => {
     avatarURL: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
     content: m.content,
     embeds: m.embeds,
-    files: [...(await Promise.all(m.attachments.values().map(async a => new AttachmentBuilder(
-      Buffer.from(await (await fetch(a.proxyURL)).arrayBuffer())
-    ).setDescription(a.description ?? '').setName(a.name).setSpoiler(a.spoiler))))],
+    files: [], // TODO
     tts: m.tts,
     withComponents: false,
   });
@@ -494,7 +492,10 @@ fluxer.on('messageCreate', async m => {
     avatarURL: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
     content: m.content,
     embeds: m.embeds,
-    files: [...m.attachments.values()],
+    // files: [...m.attachments.values()],
+    files: [...(await Promise.all(m.attachments.values().map(async a => new AttachmentBuilder(
+      Buffer.from(await (await fetch(a.proxyURL)).arrayBuffer())
+    ).setDescription(a.description ?? '').setName(a.name).setSpoiler(a.spoiler))))],
     tts: m.tts,
     withComponents: false,
   });
