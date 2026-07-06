@@ -442,7 +442,7 @@ client.on('messageCreate', async m => {
   console.log('sending a message to fluxer:', m.id);
   const targetInfo = whMapFluxer[whInfo.targetClannelID];
 
-  await fetch(`https://api.fluxer.app/webhooks/${targetInfo.whID}/${targetInfo.whToken}`, {
+  const res = await fetch(`https://api.fluxer.app/webhooks/${targetInfo.whID}/${targetInfo.whToken}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -468,6 +468,7 @@ client.on('messageCreate', async m => {
       withComponents: false,
     } satisfies MessagePayloadOption),
   });
+  if (!res.ok) console.error('fluxer webhook error:', await res.json());
 });
 
 fluxer.on('clientReady', readyClient => {
