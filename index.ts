@@ -4,6 +4,7 @@ import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, ty
 import { type Thread, User } from '@evex/rakutenai';
 import { MexcWebsocketClient } from './mexc.ts';
 import process from 'node:process';
+import fs from 'node:fs/promises';
 import { MiQ } from './miq.ts';
 
 process.on('unhandledRejection', (reason, promise) => {
@@ -396,6 +397,18 @@ client.on('messageCreate', async m => {
 
 
 // Fluxer sync
+/** channelID: Webhook data for current channel */
+const whMapFluxer = JSON.parse((await fs.readFile('./data/fluxersync_fluxer.json')).toString()) as Record<string, {
+  whID: string,
+  whToken: string,
+  targetClannelID: string, // relation
+}>;
+const whMapDiscord = JSON.parse((await fs.readFile('./data/fluxersync_discord.json')).toString()) as Record<string, {
+  whID: string,
+  whToken: string,
+  targetClannelID: string, // relation
+}>;
+
 const fluxer = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -414,29 +427,24 @@ const fluxer = new Client({
   },
 });
 
-const discordWHID = '1501483510886825986';
-const discordWH = new WebhookClient({ id: discordWHID, token: process.env['DISCORD_WH_TOKEN']! });
-const discordTargetCh = '1437420093259907175';
-
-const fluxerWHID = '1493982452663773810';
-const fluxerWH = new WebhookClient({ id: fluxerWHID, token: process.env['FLUXER_WH_TOKEN']! }, {
- rest: {
-    api: 'https://api.fluxer.app',
-    version: '1',
-    cdn: 'https://fluxerusercontent.com'
-  },
-});
-const fluxerTargetCh = '1493973306367330573';
-
 // TODO:
 // m.type === MessageType.UserJoin
 // emoji
 // mentions
 
 client.on('messageCreate', async m => {
-  if(m.channelId !== discordTargetCh
-    || m.author.id === discordWHID) return;
+  const whInfo = whMapDiscord[m.channelId];
+  if(!whInfo || m.author.id === whInfo.whID) return;
   console.log('sending a message to fluxer:', m.id);
+  const targetInfo = whMapFluxer[whInfo.targetClannelID];
+  const fluxerWH = new WebhookClient({ id: targetInfo.whID, token: targetInfo.whToken }, {
+   rest: {
+      api: 'https://api.fluxer.app',
+      version: '1',
+      cdn: 'https://fluxerusercontent.com'
+    },
+  });
+
   await fluxerWH.send({
     allowedMentions: {
       parse: [], // とりあえずメンション無し
@@ -457,9 +465,11 @@ fluxer.on('clientReady', readyClient => {
 });
 
 fluxer.on('messageCreate', async m => {
-  if(m.channelId !== fluxerTargetCh
-    || m.author.id === fluxerWHID) return;
+  const whInfo = whMapFluxer[m.channelId];
+  if(!whInfo || m.author.id === whInfo.whID) return;
   console.log('sending a message to discord:', m.id);
+  const targetInfo = whMapDiscord[whInfo.targetClannelID];
+  const discordWH = new WebhookClient({ id: targetInfo.whID, token: targetInfo.whToken });
   await discordWH.send({
     allowedMentions: {
       parse: [], // とりあえずメンション無し
