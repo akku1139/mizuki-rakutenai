@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel, type SendableChannels, type Snowflake, WebhookClient, AttachmentBuilder } from 'discord.js';
+import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel, type SendableChannels, type Snowflake, WebhookClient, AttachmentBuilder, type MessagePayloadOption } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
 import { MexcWebsocketClient } from './mexc.ts';
 import process from 'node:process';
@@ -438,28 +438,32 @@ const fluxer = new Client({
 
 client.on('messageCreate', async m => {
   const whInfo = whMapDiscord[m.channelId];
-  if(!whInfo || m.author.id === whInfo.whID) return;
+  if (!whInfo || m.author.id === whInfo.whID) return;
   console.log('sending a message to fluxer:', m.id);
   const targetInfo = whMapFluxer[whInfo.targetClannelID];
   const fluxerWH = new WebhookClient({ id: targetInfo.whID, token: targetInfo.whToken }, {
-   rest: {
+    rest: {
       api: 'https://api.fluxer.app',
       version: '1',
       cdn: 'https://fluxerusercontent.com'
     },
   });
 
-  await fluxerWH.send({
-    allowedMentions: {
-      parse: [], // とりあえずメンション無し
-    },
-    username: `${m.member?.nickname ?? m.author.displayName}#Discord`,
-    avatarURL: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
-    content: m.content,
-    embeds: m.embeds,
-    files: [...m.attachments.values().map(a => ({ name: a.name, url: a.proxyURL })) as any],
-    tts: m.tts,
-    withComponents: false,
+  await fetch(`https://api.fluxer.app/webhooks/${targetInfo.whID}/${targetInfo.whToken}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      allowedMentions: {
+        parse: [], // とりあえずメンション無し
+      },
+      username: `${m.member?.nickname ?? m.author.displayName}#Discord`,
+      avatarURL: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
+      content: m.content,
+      embeds: m.embeds,
+      files: [...m.attachments.values().map(a => ({ name: a.name, url: a.proxyURL })) as any],
+      tts: m.tts,
+      withComponents: false,
+    } satisfies MessagePayloadOption),
   });
 });
 
