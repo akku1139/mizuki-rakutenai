@@ -442,31 +442,39 @@ client.on('messageCreate', async m => {
   console.log('sending a message to fluxer:', m.id);
   const targetInfo = whMapFluxer[whInfo.targetClannelID];
 
+  const formData = new FormData();
+  formData.append('payload_json', JSON.stringify({
+    allowedMentions: {
+      parse: [], // とりあえずメンション無し
+    },
+    username: `${m.member?.nickname ?? m.author.displayName}#Discord`,
+    avatar_url: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
+    content: m.content,
+    embeds: m.embeds,
+    attachments: m.attachments.map((a, i) => ({
+      id: i,
+      filename: a.name,
+      content_type: a.contentType,
+      description: a.description,
+      /** MessageAttachmentFlags: IS_SPOILER (8), CONTAINS_EXPLICIT_MEDIA (16), IS_ANIMATED (32) */
+      flags: 8 * Number(a.spoiler),
+      // duration:
+      // waveform:
+    })),
+    // https://github.com/fluxerjs/core/blob/cca2f8ff28f82e8a4d43c834ed38f08d484a8bd6/packages/fluxer-core/src/structures/Webhook.ts#L28-L35
+    // https://github.com/KartoffelChipss/bifrost/blob/923a2161ffe0795f90e78e66e6daedc8c6992046/src/services/WebhookService.ts#L240-L246
+    // https://github.com/fluxerapp/fluxer/blob/29f0f34c76414adb40fcd8dfd040f6b7f4da2b41/fluxer_api/src/api/webhook/tests/WebhookMultipartAttachmentUploads.test.ts
+    // https://deepwiki.com/search/webhook_0ce957d0-db57-4f93-8e53-4b8471941adf?mode=deep
+    tts: m.tts,
+    withComponents: false,
+  }));
+
+  (await Promise.all(m.attachments.map<Promise<[string, Blob]>>(async a => [a.name, await (await fetch(a.proxyURL)).blob()])))
+    .forEach((f, i) => formData.append(`files[${i}]`, f[1], f[0]));
+
   const res = await fetch(`https://api.fluxer.app/webhooks/${targetInfo.whID}/${targetInfo.whToken}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      allowedMentions: {
-        parse: [], // とりあえずメンション無し
-      },
-      username: `${m.member?.nickname ?? m.author.displayName}#Discord`,
-      avatarURL: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
-      content: m.content,
-      embeds: m.embeds,
-      files: m.attachments.map(a => ({ name: a.name, filename: a.name, url: a.proxyURL })) as any,
-      attachments: m.attachments.map((a, i) => ({
-        id: i,
-        title: a.name,
-        filename: a.name,
-        description: a.description,
-        /** MessageAttachmentFlags: IS_SPOILER (8), CONTAINS_EXPLICIT_MEDIA (16), IS_ANIMATED (32) */
-        flags: 8*Number(a.spoiler),
-      })) as any,
-      // https://github.com/fluxerjs/core/blob/cca2f8ff28f82e8a4d43c834ed38f08d484a8bd6/packages/fluxer-core/src/structures/Webhook.ts#L28-L35
-      // https://github.com/KartoffelChipss/bifrost/blob/923a2161ffe0795f90e78e66e6daedc8c6992046/src/services/WebhookService.ts#L240-L246
-      tts: m.tts,
-      withComponents: false,
-    } satisfies MessagePayloadOption),
+    body: formData,
   });
   if (!res.ok) console.error('fluxer webhook error:', await res.json());
 });
