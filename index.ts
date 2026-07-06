@@ -451,16 +451,16 @@ client.on('messageCreate', async m => {
     avatar_url: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
     content: m.content,
     embeds: m.embeds,
-    attachments: Array.from(m.attachments.values().map((a, i) => ({
+    attachments: Array.from(m.attachments.values()).map((a, i) => ({
       id: i,
       filename: a.name,
       content_type: a.contentType,
-      description: a.description,
+      description: a.description ?? undefined,
       /** MessageAttachmentFlags: IS_SPOILER (8), CONTAINS_EXPLICIT_MEDIA (16), IS_ANIMATED (32) */
       flags: 8 * Number(a.spoiler),
       // duration:
       // waveform:
-    }))),
+    })),
     // https://github.com/fluxerjs/core/blob/cca2f8ff28f82e8a4d43c834ed38f08d484a8bd6/packages/fluxer-core/src/structures/Webhook.ts#L28-L35
     // https://github.com/KartoffelChipss/bifrost/blob/923a2161ffe0795f90e78e66e6daedc8c6992046/src/services/WebhookService.ts#L240-L246
     // https://github.com/fluxerapp/fluxer/blob/29f0f34c76414adb40fcd8dfd040f6b7f4da2b41/fluxer_api/src/api/webhook/tests/WebhookMultipartAttachmentUploads.test.ts
