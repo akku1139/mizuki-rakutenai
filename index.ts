@@ -451,7 +451,7 @@ client.on('messageCreate', async m => {
     avatar_url: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
     content: m.content,
     embeds: m.embeds,
-    attachments: m.attachments.map((a, i) => ({
+    attachments: m.attachments.values().map((a, i) => ({
       id: i,
       filename: a.name,
       content_type: a.contentType,
