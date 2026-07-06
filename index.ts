@@ -478,7 +478,7 @@ fluxer.on('messageCreate', async m => {
       whMapFluxer[m.channelId] = { whID: whSrc.id, whToken: whSrc.token, targetClannelID: distCh };
       whMapDiscord[distCh] = { whID: whDist.id, whToken: whDist.token, targetClannelID: m.channelId };
       await saveWhMap();
-      await m.reply(`link channel with: https://discord.com/channels/1255359848644608035/${distCh}`);
+      await m.reply(`link channel between https://discord.com/channels/1255359848644608035/${distCh} and https://fluxer.app/channels/1493971310876907609/${m.channelId}`);
     }
     return;
   }
