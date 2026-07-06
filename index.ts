@@ -457,8 +457,9 @@ client.on('messageCreate', async m => {
     avatarURL: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
     content: m.content,
     embeds: m.embeds,
-    // これダメ
-    //files: [...m.attachments.values()],
+    files: [...(await Promise.all(m.attachments.values().map(async a => new AttachmentBuilder(
+      Buffer.from(await (await fetch(a.proxyURL)).arrayBuffer())
+    ).setDescription(a.description ?? '').setName(a.name).setSpoiler(a.spoiler))))],
     tts: m.tts,
     withComponents: false,
   });
