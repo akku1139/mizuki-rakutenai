@@ -144,14 +144,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
     && m.guild !== null
   ) {
     // ★ ミラーペアなら、Discord側のチャンネルIDを共有キーとする
-    let contextKey: string;
-    if (whMapDiscord[m.channelId]) {
-      contextKey = m.channelId; // Discord側（そのまま）
-    } else if (whMapFluxer[m.channelId]) {
-      contextKey = whMapFluxer[m.channelId].targetClannelID; // Fluxer側 → 対応するDiscordチャンネルID
-    } else {
-      contextKey = m.channelId; // ミラーなし
-    }
+    const contextKey = whMapFluxer[m.channelId] ? whMapFluxer[m.channelId].targetClannelID : m.channelId;
     if (m.content === '<@1379433738143924284> clear' || m.content === '<@1493977173863738082> clear') {
       chatStore.delete(contextKey);
       await m.reply('chat context destroyed.');
