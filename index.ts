@@ -706,8 +706,7 @@ fluxer.on('guildMemberRemove', async m => {
 
 
 /// MiQ feature
-/*
-client.on('messageCreate', async m => {
+fluxer.on('messageCreate', async m => {
   if (!(m.content === 'めいく' || m.content === 'make')) return;
   if (!m.reference?.messageId) return;
   m.channel.sendTyping();
@@ -716,7 +715,6 @@ client.on('messageCreate', async m => {
   const response = await miq.generate();
   await m.reply({ files: [new AttachmentBuilder(response, { name: 'miq.png' })]});
 });
-*/
 
 client.login(process.env['DISCORD_TOKEN']);
 fluxer.login(process.env['FLUXER_TOKEN']);
