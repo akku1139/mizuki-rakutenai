@@ -7,33 +7,22 @@ const BETA_API_URL = 'https://api.voids.top/fakequotebeta';
 
 export const fetchToBase64 = async (url: string) => {
   try {
-    // 1. データをフェッチする
     const response = await fetch(url);
-
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    // 2. レスポンスをBlob（バイナリデータ）として取得する
-    const blob = await response.blob();
+    // 2. MIMEタイプを取得（例: image/png, application/pdf）
+    const contentType = response.headers.get("content-type");
 
-    // 3. FileReaderを使用してBase64のData URLに変換する
-    return new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
+    // 3. レスポンスをArrayBufferとして取得
+    const arrayBuffer = await response.arrayBuffer();
 
-      // 読み込み完了時の処理
-      reader.onloadend = () => {
-        resolve(reader.result as string); // 例: "data:image/png;base64,iVBORw0KG..."
-      };
+    // 4. Bufferを経由してBase64文字列に変換
+    const base64String = Buffer.from(arrayBuffer).toString("base64");
 
-      // エラー時の処理
-      reader.onerror = (error) => {
-        reject(error);
-      };
-
-      // BlobをData URLとして読み込む
-      reader.readAsDataURL(blob);
-    });
+    // 5. Data URL形式に組み立てて返す
+    return `data:${contentType};base64,${base64String}`;
 
   } catch (error) {
     console.error("フェッチまたは変換中にエラーが発生しました:", error);
