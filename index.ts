@@ -611,7 +611,7 @@ client.on('guildMemberRemove', async m => {
 
 
 /// logging on fluxer
-const logwhFluxer = new WebhookClient({ url: process.env['FLUXER_LOG_WEBHOOK']! }, {
+const logwhFluxer = new WebhookClient({ id: process.env['FLUXER_LOG_WEBHOOK_ID']!, token: process.env['FLUXER_LOG_WEBHOOK_TOKEN']! }, {
   rest: {
      api: 'https://api.fluxer.app',
      version: '1',
