@@ -711,7 +711,7 @@ fluxer.on('messageCreate', async m => {
   if (!m.reference?.messageId) return;
   m.channel.sendTyping();
   const replied = await m.channel.messages.fetch(m.reference.messageId);
-  const miq = new MiQ().setFromMessage(replied).setColor(true);
+  const miq = (await new MiQ().setFromMessage(replied)).setColor(true);
   const response = await miq.generate();
   await m.reply({ files: [new AttachmentBuilder(response, { name: 'miq.png' })]});
 });

@@ -5,6 +5,43 @@ import type { Message as DiscordMessage } from 'discord.js';
 const API_URL = 'https://api.voids.top/fakequote'
 const BETA_API_URL = 'https://api.voids.top/fakequotebeta';
 
+export const fetchToBase64 = async (url: string) => {
+  try {
+    // 1. データをフェッチする
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    // 2. レスポンスをBlob（バイナリデータ）として取得する
+    const blob = await response.blob();
+
+    // 3. FileReaderを使用してBase64のData URLに変換する
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+
+      // 読み込み完了時の処理
+      reader.onloadend = () => {
+        resolve(reader.result as string); // 例: "data:image/png;base64,iVBORw0KG..."
+      };
+
+      // エラー時の処理
+      reader.onerror = (error) => {
+        reject(error);
+      };
+
+      // BlobをData URLとして読み込む
+      reader.readAsDataURL(blob);
+    });
+
+  } catch (error) {
+    console.error("フェッチまたは変換中にエラーが発生しました:", error);
+    return url;
+  }
+}
+
+
 // --- 型定義 ---
 
 export interface MiQFormat {
@@ -50,11 +87,11 @@ export class MiQ {
    * @function setFromMessage
    * @description Sets the quote properties based on a Discord message object.
    */
-  public setFromMessage(message: DiscordMessage, formatText = false): this {
+  public async setFromMessage(message: DiscordMessage, formatText = false): Promise<this> {
     this.setText(message.content, formatText);
 
     const avatarUrl = message.member ? message.member.displayAvatarURL() : message.author.displayAvatarURL();
-    this.setAvatar(avatarUrl);
+    this.setAvatar(await fetchToBase64(avatarUrl));
 
     const hasNoDiscriminator = !message.author?.discriminator || message.author?.discriminator === '0';
     const username = hasNoDiscriminator
