@@ -17,6 +17,23 @@ const client = new Client({ intents: [
   GatewayIntentBits.MessageContent,
   GatewayIntentBits.GuildMembers,
 ] });
+const fluxer = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
+  ],
+  rest: {
+    // do not add / at the last
+    api: 'https://api.fluxer.app',
+    version: '1',
+    cdn: 'https://fluxerusercontent.com'
+  },
+  ws: {
+    version: 1,
+  },
+});
 
 export const splitLongString = (text: string, len: number): Array<string> => {
   const result: Array<string> = [];
@@ -116,19 +133,19 @@ const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, 
   return sent;
 }
 
-client.on('messageCreate', async m => {
-  if(
-      !m.author.bot
+const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
+  if (
+    !m.author.bot
     && m.mentions.users.has(client.user!.id)
     && (m.channel instanceof TextChannel || m.channel instanceof ThreadChannel)
     && m.guild !== null
   ) {
-    if(m.content === '<@1379433738143924284> clear') {
+    if (m.content === '<@1379433738143924284> clear') {
       chatStore.delete(m.channelId);
       await m.reply('chat context destroyed.');
       return;
     }
-    if(m.content === '<@1379433738143924284> chatlist') {
+    if (m.content === '<@1379433738143924284> chatlist') {
       await m.reply(`job queue: \`{ waiting: ${aiWaitingJobs}, processing : ${aiProcessingJobs} }\`\ncontext list:\n\`\`\`json\n${JSON.stringify(Array.from(chatStore.keys()), null, 2)}\n\`\`\``);
       return;
     }
@@ -170,10 +187,10 @@ client.on('messageCreate', async m => {
         return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
       }));
 
-      if(m.reference?.messageId) {
+      if (m.reference?.messageId) {
         const ref = await m.channel.messages.fetch(m.reference.messageId).catch(console.error);
-        if(ref && ref?.author.id !== '1379433738143924284') {
-          rep += `> from: ${ref.member?.displayName ?? ref.author.displayName} (${ref.author.username}, ${ref.author.id}) >\n` +(await Promise.all(
+        if (ref && ref?.author.id !== '1379433738143924284') {
+          rep += `> from: ${ref.member?.displayName ?? ref.author.displayName} (${ref.author.username}, ${ref.author.id}) >\n` + (await Promise.all(
             (await m.channel.messages.fetch({ around: m.reference.messageId, limit: 10 }))
               .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
               .filter(fm => fm.author.id === ref?.author.id) // 非連続でも拾うけどいいよね
@@ -191,8 +208,8 @@ client.on('messageCreate', async m => {
                   console.log('file:', f.url, f.name);
                   const file = await createFileFromUrl(f.proxyURL, f.name);
                   return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
-                })) );
-                return fm.content.replace(/^/gm, "> ") + ( (fm.embeds && fm.embeds.length !== 0) ? ('\n> embed > ' + JSON.stringify(fm.embeds)) : '');
+                })));
+                return fm.content.replace(/^/gm, "> ") + ((fm.embeds && fm.embeds.length !== 0) ? ('\n> embed > ' + JSON.stringify(fm.embeds)) : '');
               })
           )).join('\n');
           rep += '\n\n';
@@ -214,12 +231,12 @@ client.on('messageCreate', async m => {
       let c = 0;
 
       let first = true;
-      let last: Message|undefined;
+      let last: Message | undefined;
 
       for await (const gen of res) {
-        if(++c%7 === 0)
+        if (++c % 7 === 0)
           m.channel.sendTyping();
-        switch(gen.type) {
+        switch (gen.type) {
           case 'reasoning-start':
             console.log('start reasoning...');
             break;
@@ -238,16 +255,16 @@ client.on('messageCreate', async m => {
             console.log('image:', gen.url);
             m.channel.sendTyping();
 
-            if(!isEffectivelyEmpty(text)) {
+            if (!isEffectivelyEmpty(text)) {
               await sendMessage(text, m, first);
               text = '';
               first = false;
             }
 
-            if(last) await last.edit({ content: gen.url });
+            if (last) await last.edit({ content: gen.url });
             else last = await sendMessage(gen.url, m, first);
 
-            if(gen.type === 'image') last = void 0;
+            if (gen.type === 'image') last = void 0;
 
             /* なぜかembedの画像が一瞬で消える
             await m.channel.send({ embeds: [
@@ -263,7 +280,7 @@ client.on('messageCreate', async m => {
 
           case 'tool-call-detail':
             console.log('fc:', gen);
-            if(!isEffectivelyEmpty(text)) {
+            if (!isEffectivelyEmpty(text)) {
               await sendMessage(text, m, first);
               text = '';
               first = false;
@@ -283,7 +300,7 @@ client.on('messageCreate', async m => {
 
       text += '\n-# model: rakutenai';
       await sendMessage(text, m, first);
-    } catch(e) {
+    } catch (e) {
       console.error(m.id, ': An error occurred during processing\n', e);
       await m.reply(`ERROR:\n\`\`\`\n${e}\n\`\`\``);
     } finally {
@@ -291,7 +308,9 @@ client.on('messageCreate', async m => {
       resolveNext();
     }
   }
-});
+};
+
+client.on('messageCreate', aiHandler);
 
 
 /// watch 114514 coin
@@ -412,24 +431,6 @@ const saveWhMap = async () => {
   await fs.writeFile('./data/fluxersync_fluxer.json', JSON.stringify(whMapFluxer));
   await fs.writeFile('./data/fluxersync_discord.json', JSON.stringify(whMapDiscord));
 };
-
-const fluxer = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers,
-  ],
-  rest: {
-    // do not add / at the last
-    api: 'https://api.fluxer.app',
-    version: '1',
-    cdn: 'https://fluxerusercontent.com'
-  },
-  ws: {
-    version: 1,
-  },
-});
 
 // TODO:
 // m.type === MessageType.UserJoin
