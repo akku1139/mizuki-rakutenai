@@ -642,7 +642,7 @@ fluxer.on('messageUpdate', async (o, n) => {
   if (o.guildId !== evexIDFluxer || o.author?.id === logwhFluxer.id || o.content === n.content) return;
   await logwhFluxer.send({
     embeds: [{
-      description: `:pencil2: **Message sent by <@${o.author?.id}> edited in <#${o.channelId}>.**  [Jump to Message](${o.url})`,
+      description: `:pencil2: **Message sent by <@${o.author?.id}> edited in <#${o.channelId}>.**  [Jump to Message](${o.url.replace('https://discord.com/channels/', 'https://web.fluxer.app/channels/')})`,
       footer: {
         text: "Evex Developers@Fluxer.app",
       },
