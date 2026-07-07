@@ -11,12 +11,15 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('unhandledRejection', reason, promise);
 });
 
+// 1379433738143924284
 const client = new Client({ intents: [
   GatewayIntentBits.Guilds,
   GatewayIntentBits.GuildMessages,
   GatewayIntentBits.MessageContent,
   GatewayIntentBits.GuildMembers,
 ] });
+
+// 1493977173863738082
 const fluxer = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -140,12 +143,12 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
     && (m.channel instanceof TextChannel || m.channel instanceof ThreadChannel)
     && m.guild !== null
   ) {
-    if (m.content === '<@1379433738143924284> clear') {
+    if (m.content === '<@1379433738143924284> clear' || m.content === '<@1493977173863738082> clear') {
       chatStore.delete(m.channelId);
       await m.reply('chat context destroyed.');
       return;
     }
-    if (m.content === '<@1379433738143924284> chatlist') {
+    if (m.content === '<@1379433738143924284> chatlist' || m.content === '<@1493977173863738082> chatlist') {
       await m.reply(`job queue: \`{ waiting: ${aiWaitingJobs}, processing : ${aiProcessingJobs} }\`\ncontext list:\n\`\`\`json\n${JSON.stringify(Array.from(chatStore.keys()), null, 2)}\n\`\`\``);
       return;
     }
@@ -158,7 +161,6 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       chatStore.set(m.channelId, newChat);
       rep = `===== 指示 (重要) =====
 あなたはDiscord上で活動するAIアシスタントです。
-あなたのユーザーIDは 1379433738143924284 です。
 レスポンスは簡潔かつカジュアルに、2行から長くても6行程度で。
 もちろんもっとシンプルに返してもいい。
 全角英数字、全角記号、半角カタカナの使用は避け、代わりに半角英数字/記号、全角カタカナを用いてください。
@@ -189,7 +191,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       if (m.reference?.messageId) {
         const ref = await m.channel.messages.fetch(m.reference.messageId).catch(console.error);
-        if (ref && ref?.author.id !== '1379433738143924284') {
+        if (ref && ref.author.id !== '1379433738143924284' && ref.author.id !== '1493977173863738082') {
           rep += `> from: ${ref.member?.displayName ?? ref.author.displayName} (${ref.author.username}, ${ref.author.id}) >\n` + (await Promise.all(
             (await m.channel.messages.fetch({ around: m.reference.messageId, limit: 10 }))
               .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
@@ -216,7 +218,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         }
       }
 
-      const input = (rep + `from: ${m.member?.displayName ?? m.author.displayName} (${m.author.username}, ${m.author.id})\n` + m.content).replaceAll('<@1379433738143924284>', '');
+      const input = (rep + `from: ${m.member?.displayName ?? m.author.displayName} (${m.author.username}, ${m.author.id})\n` + m.content).replaceAll('<@1379433738143924284>', '').replaceAll('<@1493977173863738082>', '');
       console.log(m.id, input);
 
       const res = chat.t.sendMessage({
@@ -311,6 +313,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 };
 
 client.on('messageCreate', aiHandler);
+fluxer.on('messageCreate', aiHandler);
 
 
 /// watch 114514 coin
