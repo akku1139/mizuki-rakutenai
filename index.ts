@@ -420,7 +420,7 @@ client.on('messageCreate', async m => {
 });
 
 
-// Fluxer sync
+/// Fluxer sync
 /** channelID: Webhook data for current channel */
 const whMapFluxer = JSON.parse((await fs.readFile('./data/fluxersync_fluxer.json')).toString()) as Record<string, {
   whID: string,
@@ -521,7 +521,7 @@ fluxer.on('messageCreate', async m => {
 });
 
 
-// logging feature
+/// logging feature
 const logwh = new WebhookClient({ url: process.env['DISCORD_LOG_WEBHOOK']! });
 const evexID = '1255359848644608035';
 
@@ -598,6 +598,95 @@ client.on('guildMemberRemove', async m => {
       description: `:airplane_departure: <@${m.user.id}> left Evex Developers`,
       footer: {
         text: "Evex Developers",
+      },
+      author: {
+        name: `${m.user.displayName} (${m.user.username})`,
+        icon_url: m.user.avatarURL() ?? undefined,
+      },
+      timestamp: new Date().toISOString(),
+      color: 0xd3c821,
+    }],
+  });
+});
+
+
+/// logging
+const logwhFluxer = new WebhookClient({ url: process.env['FLUXER_LOG_WEBHOOK']! });
+const evexIDFluxer = '1493971310876907609';
+
+client.on('messageDelete', async m => {
+  if (m.guildId !== evexIDFluxer) return;
+  await logwhFluxer.send({
+    embeds: [{
+      description: `:wastebasket: **Message sent by <@${m.author?.id}> deleted in <#${m.channelId}>.**\n${m.content}`,
+      footer: {
+        text: "Evex Developers@Fluxer.app",
+      },
+      author: {
+        name: `${m.author?.username}`,
+        icon_url: m.member?.avatarURL() ?? m.author?.avatarURL() ?? undefined,
+      },
+      timestamp: new Date().toISOString(),
+      color: 0xd0021a,
+    }],
+  });
+});
+
+client.on('messageUpdate', async (o, n) => {
+  if (o.guildId !== evexIDFluxer || o.author?.id === logwhFluxer.id || o.content === n.content) return;
+  await logwhFluxer.send({
+    embeds: [{
+      description: `:pencil2: **Message sent by <@${o.author?.id}> edited in <#${o.channelId}>.**  [Jump to Message](${o.url})`,
+      footer: {
+        text: "Evex Developers@Fluxer.app",
+      },
+      author: {
+        name: `${o.author?.username}`,
+        icon_url: o.member?.avatarURL() ?? o.author?.avatarURL() ?? undefined,
+      },
+      timestamp: new Date().toISOString(),
+      color: 0x7dd321,
+      fields: [
+        {
+          name: "**Old**",
+          value: '```md\n'+o.content+'\n```',
+          inline: false,
+        },
+        {
+          name: "**New**",
+          value: '```md\n'+n.content+'\n```',
+          inline: false,
+        }
+      ],
+    }],
+  });
+});
+
+client.on('guildMemberAdd', async m => {
+  if (m.guild.id !== evexIDFluxer) return;
+  await logwhFluxer.send({
+    embeds: [{
+      description: `:airplane_arriving: <@${m.user.id}> joined Evex Developers@Fluxer.app`,
+      footer: {
+        text: "Evex Developers@Fluxer.app",
+      },
+      author: {
+        name: `${m.user.displayName} (${m.user.username})`,
+        icon_url: m.user.avatarURL() ?? undefined,
+      },
+      timestamp: new Date().toISOString(),
+      color: 0x21d3c2,
+    }],
+  });
+});
+
+client.on('guildMemberRemove', async m => {
+  if (m.guild.id !== evexIDFluxer) return;
+  await logwhFluxer.send({
+    embeds: [{
+      description: `:airplane_departure: <@${m.user.id}> left Evex Developers@Fluxer.app`,
+      footer: {
+        text: "Evex Developers@Fluxer.app",
       },
       author: {
         name: `${m.user.displayName} (${m.user.username})`,
