@@ -143,8 +143,17 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
     && (m.channel instanceof TextChannel || m.channel instanceof ThreadChannel)
     && m.guild !== null
   ) {
+    // ★ ミラーペアなら、Discord側のチャンネルIDを共有キーとする
+    let contextKey: string;
+    if (whMapDiscord[m.channelId]) {
+      contextKey = m.channelId; // Discord側（そのまま）
+    } else if (whMapFluxer[m.channelId]) {
+      contextKey = whMapFluxer[m.channelId].targetClannelID; // Fluxer側 → 対応するDiscordチャンネルID
+    } else {
+      contextKey = m.channelId; // ミラーなし
+    }
     if (m.content === '<@1379433738143924284> clear' || m.content === '<@1493977173863738082> clear') {
-      chatStore.delete(m.channelId);
+      chatStore.delete(contextKey);
       await m.reply('chat context destroyed.');
       return;
     }
@@ -153,12 +162,12 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       return;
     }
     let rep: string = ''; // リプとかシステムプロンプトとか
-    const chat = chatStore.get(m.channelId) ?? await (async () => {
+    const chat = chatStore.get(contextKey) ?? await (async () => {
       const newChat = {
         t: await (await User.create()).createThread(),
         q: Promise.resolve(),
       };
-      chatStore.set(m.channelId, newChat);
+      chatStore.set(contextKey, newChat);
       rep = `===== 指示 (重要) =====
 あなたはDiscord上で活動するAIアシスタントです。
 レスポンスは簡潔かつカジュアルに、2行から長くても6行程度で。
