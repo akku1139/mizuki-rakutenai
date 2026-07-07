@@ -610,11 +610,17 @@ client.on('guildMemberRemove', async m => {
 });
 
 
-/// logging
-const logwhFluxer = new WebhookClient({ url: process.env['FLUXER_LOG_WEBHOOK']! });
+/// logging on fluxer
+const logwhFluxer = new WebhookClient({ url: process.env['FLUXER_LOG_WEBHOOK']! }, {
+  rest: {
+     api: 'https://api.fluxer.app',
+     version: '1',
+     cdn: 'https://fluxerusercontent.com'
+   },
+});
 const evexIDFluxer = '1493971310876907609';
 
-client.on('messageDelete', async m => {
+fluxer.on('messageDelete', async m => {
   if (m.guildId !== evexIDFluxer) return;
   await logwhFluxer.send({
     embeds: [{
@@ -632,7 +638,7 @@ client.on('messageDelete', async m => {
   });
 });
 
-client.on('messageUpdate', async (o, n) => {
+fluxer.on('messageUpdate', async (o, n) => {
   if (o.guildId !== evexIDFluxer || o.author?.id === logwhFluxer.id || o.content === n.content) return;
   await logwhFluxer.send({
     embeds: [{
@@ -662,7 +668,7 @@ client.on('messageUpdate', async (o, n) => {
   });
 });
 
-client.on('guildMemberAdd', async m => {
+fluxer.on('guildMemberAdd', async m => {
   if (m.guild.id !== evexIDFluxer) return;
   await logwhFluxer.send({
     embeds: [{
@@ -680,7 +686,7 @@ client.on('guildMemberAdd', async m => {
   });
 });
 
-client.on('guildMemberRemove', async m => {
+fluxer.on('guildMemberRemove', async m => {
   if (m.guild.id !== evexIDFluxer) return;
   await logwhFluxer.send({
     embeds: [{
