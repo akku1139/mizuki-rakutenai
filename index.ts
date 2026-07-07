@@ -713,32 +713,7 @@ fluxer.on('messageCreate', async m => {
   const replied = await m.channel.messages.fetch(m.reference.messageId);
   const miq = (await new MiQ().setFromMessage(replied)).setColor(true);
   const response = await miq.generate();
-  if (typeof response === 'string') {
-    await m.reply(response);
-  } else {
-    // await m.reply({ files: [new AttachmentBuilder(response, { name: 'miq.png' })] });
-    const formData = new FormData();
-    formData.append('payload_json', JSON.stringify({
-      attachments: Array.from(m.attachments.values()).map((a, i) => ({
-        id: i,
-        filename: a.name,
-        content_type: a.contentType,
-      })),
-    }));
-
-    formData.append(`files[0]`, new Blob([new Uint8Array(response)], { type: 'image/png' }), 'miq.png')
-
-    const res = await fetch(`https://api.fluxer.app/v1/channels/${m.channelId}/messages`, {
-      method: "POST",
-      headers: {
-        'Authorization': `Bot ${fluxer.token}`,
-      },
-      body: formData,
-    });
-
-    if (!res.ok)
-      console.error('fluxer api error during miq:', await res.json())
-  }
+  await m.reply(response);
 });
 
 client.login(process.env['DISCORD_TOKEN']);

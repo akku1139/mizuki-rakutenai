@@ -212,7 +212,7 @@ export class MiQ {
    * @function generate
    * @description Generates the quote by sending a request using native fetch API.
    */
-  public async generate(returnRawImage = false): Promise<string | Buffer> {
+  public async generate(returnRawImage = false): Promise<string> {
     if (!this.format.text) {
       throw new Error('Text is required');
     }
@@ -234,18 +234,7 @@ export class MiQ {
       }
 
       const resData = (await response.json()) as { url: string };
-
-      if (returnRawImage) {
-        // 画像URLからバイナリを取得
-        const imageResponse = await fetch(resData.url);
-        if (!imageResponse.ok) {
-          throw new Error(`Failed to fetch raw image. Status: ${imageResponse.status}`);
-        }
-        const arrayBuffer = await imageResponse.arrayBuffer();
-        return Buffer.from(arrayBuffer);
-      } else {
-        return resData.url;
-      }
+      return resData.url;
     } catch (error: any) {
       throw new Error(`Failed to generate quote: ${error.message}`);
     }
