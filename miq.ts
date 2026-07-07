@@ -1,29 +1,57 @@
 // https://github.com/oto-lab/makeitaquote/blob/c6b51102901301c25aef7dbeb0a13d407b0ce0ad/index.js
 
 import type { Message as DiscordMessage } from 'discord.js';
+import { spawn } from 'node:child_process';
 
 const API_URL = 'https://api.voids.top/fakequote'
 const BETA_API_URL = 'https://api.voids.top/fakequotebeta';
 
 export const fetchToBase64 = async (url: string) => {
   try {
+    // 1. Fetch the source file data
     const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    // 2. MIMEタイプを取得（例: image/png, application/pdf）
-    const contentType = response.headers.get("content-type");
-
-    // 3. レスポンスをArrayBufferとして取得
+    if (!response.ok) throw new Error(`HTTP status error: ${response.status}`);
     const arrayBuffer = await response.arrayBuffer();
+    const inputBuffer = Buffer.from(arrayBuffer);
 
-    // 4. Bufferを経由してBase64文字列に変換
-    const base64String = Buffer.from(arrayBuffer).toString("base64");
+    // 2. Wrap FFmpeg process inside a Promise
+    const pngBuffer = await new Promise<Buffer>((resolve, reject) => {
+      // Arguments:
+      // -i pipe:0  -> Read input from stdin
+      // -f image2  -> Force image sequence format
+      // -vcodec png -> Encode specifically to PNG
+      // pipe:1     -> Output the result to stdout
+      const ffmpeg = spawn('ffmpeg', ['-i', 'pipe:0', '-f', 'image2', '-vcodec', 'png', 'pipe:1']);
 
-    // 5. Data URL形式に組み立てて返す
-    return `data:${contentType};base64,${base64String}`;
+      const chunks: any[] = [];
+      const errorChunks: any[] = [];
 
+      // Collect encoded PNG bytes from stdout
+      ffmpeg.stdout.on('data', (chunk) => chunks.push(chunk));
+
+      // Collect errors from stderr
+      ffmpeg.stderr.on('data', (chunk) => errorChunks.push(chunk));
+
+      // Handle termination
+      ffmpeg.on('close', (code) => {
+        if (code === 0) {
+          resolve(Buffer.concat(chunks));
+        } else {
+          const errorMsg = Buffer.concat(errorChunks).toString();
+          reject(new Error(`FFmpeg exited with code ${code}. Error: ${errorMsg}`));
+        }
+      });
+
+      ffmpeg.on('error', (err) => reject(err));
+
+      // Write the fetched source file bytes into FFmpeg's stdin and close it
+      ffmpeg.stdin.write(inputBuffer);
+      ffmpeg.stdin.end();
+    });
+
+    // 3. Convert the generated PNG bytes into Base64 Data URL
+    const base64String = pngBuffer.toString('base64');
+    return `data:image/png;base64,${base64String}`;
   } catch (error) {
     console.error("フェッチまたは変換中にエラーが発生しました:", error);
     return url;
