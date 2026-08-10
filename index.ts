@@ -185,6 +185,8 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       m.channel.sendTyping();
 
+      const toolCount = new Map<string, number>();
+
       const files = await Promise.all(m.attachments.map(async f => {
         console.log('file:', f.url, f.name);
         const file = await createFileFromUrl(f.proxyURL, f.name);
@@ -284,6 +286,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
           case 'tool-call-detail':
             console.log('fc:', gen);
+            toolCount.set(gen.data.name, (toolCount.get(gen.data.name) ?? 0 + 1));
             // if (!isEffectivelyEmpty(text)) {
             //   await sendMessage(text, m, first);
             //   text = '';
@@ -302,7 +305,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         }
       }
 
-      text += '\n-# model: rakutenai';
+      text += `\n-# model: rakutenai ${toolCount.size > 0 ? `(${Array.from(toolCount, ([k, v]) => `${k}: ${v}`).join(', ')})` : ""}`;
       await sendMessage(text, m, first);
     } catch (e) {
       console.error(m.id, ': An error occurred during processing\n', e);
