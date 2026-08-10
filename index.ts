@@ -284,12 +284,12 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
           case 'tool-call-detail':
             console.log('fc:', gen);
-            if (!isEffectivelyEmpty(text)) {
-              await sendMessage(text, m, first);
-              text = '';
-              first = false;
-            }
-            await m.channel.send(`-# ${gen.data.description} (${gen.data.name})`);
+            // if (!isEffectivelyEmpty(text)) {
+            //   await sendMessage(text, m, first);
+            //   text = '';
+            //   first = false;
+            // }
+            // await m.channel.send(`-# ${gen.data.description} (${gen.data.name})`);
             break;
 
           case 'error':
