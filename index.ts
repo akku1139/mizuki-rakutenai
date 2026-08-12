@@ -326,6 +326,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         }
       }
 
+      text = text.trim();
       text += `\n-# model: rakutenai ${toolCount.size > 0 ? `(${Array.from(toolCount, ([k, v]) => `${k}: ${v}`).join(', ')})` : ""}`;
       const finalMsgs = await sendMessage(text, m, first);
       sentMessageIds.push(...finalMsgs.map(msg => msg.id));
