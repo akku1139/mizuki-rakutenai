@@ -111,30 +111,31 @@ const getFileName = (urlString: string): string => {
 const chatStore: Map<string, {
   t: Thread,
   q: Promise<void>,
+  lastIds: Snowflake[],
 }> = new Map();
 
 let aiWaitingJobs = 0;
 let aiProcessingJobs = 0;
 
-const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message> => {
+const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message[]> => {
   const parts = splitLongString(text
     .replace(/^####+ /gm, '### ')
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, "[$1](<$2>)")
   , 1500);
 
-  let sent: Message = m; // ここゴミ
+  const sentMessages: Message[] = [];
 
   for(const part of parts) {
     if(first) {
-      sent = await m.reply(part);
+      sentMessages.push(await m.reply(part));
       first = false;
     } else {
-      sent = await m.channel.send(part);
+      sentMessages.push(await m.channel.send(part));
     }
   }
 
-  return sent;
-}
+  return sentMessages;
+};
 
 const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
   if (
@@ -143,8 +144,8 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
     && (m.channel instanceof TextChannel || m.channel instanceof ThreadChannel)
     && m.guild !== null
   ) {
-    // ★ ミラーペアなら、Discord側のチャンネルIDを共有キーとする
     const contextKey = whMapFluxer[m.channelId] ? whMapFluxer[m.channelId].targetClannelID : m.channelId;
+
     if (m.content === '<@1379433738143924284> clear' || m.content === '<@1493977173863738082> clear') {
       chatStore.delete(contextKey);
       await m.reply('chat context destroyed.');
@@ -154,11 +155,13 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       await m.reply(`job queue: \`{ waiting: ${aiWaitingJobs}, processing : ${aiProcessingJobs} }\`\ncontext list:\n\`\`\`json\n${JSON.stringify(Array.from(chatStore.keys()), null, 2)}\n\`\`\``);
       return;
     }
-    let rep: string = ''; // リプとかシステムプロンプトとか
+
+    let rep: string = '';
     const chat = chatStore.get(contextKey) ?? await (async () => {
       const newChat = {
         t: await (await User.create()).createThread(),
         q: Promise.resolve(),
+        lastIds: [] as Snowflake[],
       };
       chatStore.set(contextKey, newChat);
       rep = `===== 指示 (重要) =====
@@ -170,6 +173,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 `;
       return newChat;
     })();
+
     const previousTask = chat.q;
     let resolveNext: () => void = () => console.error(m.id, 'Execute off-queue');
     chat.q = new Promise((resolve) => {
@@ -187,42 +191,52 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       const toolCount = new Map<string, number>();
 
+      // ★★★ 直近の会話を取得（最大20件、ただし合計7,000文字以内）★★★
+      const recentMessages = await m.channel.messages.fetch({ limit: 20, before: m.id });
+      const sorted = [...recentMessages.values()]
+        .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+      let contextLines: string[] = [];
+      let contextLength = 0;
+      const MAX_CONTEXT_LEN = 7000;
+
+      for (const msg of sorted) {
+        if (msg.id === m.id) continue;
+        let line: string;
+        if (msg.author.id === client.user?.id || msg.author.id === fluxer.user?.id) {
+          // Bot自身のメッセージ → IDのみ（内容はスレッドに保持されている）
+          line = `[${msg.id}] (あなたの応答)`;
+        } else {
+          const replyNote = msg.reference ? ` (reply to ${msg.reference.messageId})` : '';
+          line = `[${msg.id}] ${msg.member?.displayName ?? msg.author.displayName}: ${msg.content}${replyNote}`;
+        }
+        if (contextLength + line.length + 1 > MAX_CONTEXT_LEN) break; // +1 for newline
+        contextLines.push(line);
+        contextLength += line.length + 1;
+      }
+      const contextBlock = contextLines.length > 0
+        ? contextLines.join('\n') + '\n'
+        : '';
+
+      // ★ 添付ファイル（既存処理は維持）
       const files = await Promise.all(m.attachments.map(async f => {
         console.log('file:', f.url, f.name);
         const file = await createFileFromUrl(f.proxyURL, f.name);
         return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
       }));
 
-      if (m.reference?.messageId) {
-        const ref = await m.channel.messages.fetch(m.reference.messageId).catch(console.error);
-        if (ref && ref.author.id !== '1379433738143924284' && ref.author.id !== '1493977173863738082') {
-          rep += `> from: ${ref.member?.displayName ?? ref.author.displayName} (${ref.author.username}, ${ref.author.id}) >\n` + (await Promise.all(
-            (await m.channel.messages.fetch({ around: m.reference.messageId, limit: 10 }))
-              .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-              .filter(fm => fm.author.id === ref?.author.id) // 非連続でも拾うけどいいよね
-              .map(async (fm, i) => {
-                // 副作用
-                files.push(...await Promise.all([
-                  ...fm.attachments.map(a => a),
-                  ...(fm.embeds.length === 0 ? [] : fm.embeds.filter(a => a.image?.url)
-                    .map((a, j) => ({
-                      url: a.image!.url, proxyURL: a.image?.proxyURL ?? a.image!.url,
-                      name: getFileName(a.image!.url) || `embed-${i}-${j}.png`, // 適当
-                    }))
-                  ),
-                ].map(async f => {
-                  console.log('file:', f.url, f.name);
-                  const file = await createFileFromUrl(f.proxyURL, f.name);
-                  return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
-                })));
-                return fm.content.replace(/^/gm, "> ") + ((fm.embeds && fm.embeds.length !== 0) ? ('\n> embed > ' + JSON.stringify(fm.embeds)) : '');
-              })
-          )).join('\n');
-          rep += '\n\n';
-        }
-      }
+      // ★ リプライのメタ情報と、前回の自分のメッセージIDを追加
+      const replyMeta = m.reference?.messageId ? ` (reply to ${m.reference.messageId})` : '';
+      const lastIdsInfo = chat.lastIds.length > 0
+        ? `\nあなたの前回のメッセージID: ${chat.lastIds.join(', ')}`
+        : '';
 
-      const input = (rep + `from: ${m.member?.displayName ?? m.author.displayName} (${m.author.username}, ${m.author.id})\n` + m.content).replaceAll('<@1379433738143924284>', '').replaceAll('<@1493977173863738082>', '');
+      const input = (
+        rep + contextBlock +
+        `from: ${m.member?.displayName ?? m.author.displayName} (${m.author.username}, ${m.author.id})${replyMeta}\n` +
+        m.content.replaceAll('<@1379433738143924284>', '').replaceAll('<@1493977173863738082>', '')
+      ) + lastIdsInfo;
+
       console.log(m.id, input);
 
       const res = chat.t.sendMessage({
@@ -238,6 +252,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       let first = true;
       let last: Message | undefined;
+      const sentMessageIds: Snowflake[] = [];   // 今回の応答で送信する全メッセージID
 
       for await (const gen of res) {
         if (++c % 7 === 0)
@@ -262,13 +277,18 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
             m.channel.sendTyping();
 
             if (!isEffectivelyEmpty(text)) {
-              await sendMessage(text, m, first);
+              const msgs = await sendMessage(text, m, first);
+              sentMessageIds.push(...msgs.map(msg => msg.id));
               text = '';
               first = false;
             }
 
             if (last) await last.edit({ content: gen.url });
-            else last = await sendMessage(gen.url, m, first);
+            else {
+              const msgs = await sendMessage(gen.url, m, first);
+              last = msgs[0];
+              sentMessageIds.push(...msgs.map(msg => msg.id));
+            }
 
             if (gen.type === 'image') last = void 0;
 
@@ -286,13 +306,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
           case 'tool-call-detail':
             console.log('fc:', gen);
-            toolCount.set(gen.data.name, (toolCount.get(gen.data.name) ?? 0 + 1));
-            // if (!isEffectivelyEmpty(text)) {
-            //   await sendMessage(text, m, first);
-            //   text = '';
-            //   first = false;
-            // }
-            // await m.channel.send(`-# ${gen.data.description} (${gen.data.name})`);
+            toolCount.set(gen.data.name, (toolCount.get(gen.data.name) ?? 0) + 1);
             break;
 
           case 'error':
@@ -306,7 +320,12 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       }
 
       text += `\n-# model: rakutenai ${toolCount.size > 0 ? `(${Array.from(toolCount, ([k, v]) => `${k}: ${v}`).join(', ')})` : ""}`;
-      await sendMessage(text, m, first);
+      const finalMsgs = await sendMessage(text, m, first);
+      sentMessageIds.push(...finalMsgs.map(msg => msg.id));
+
+      // ★ 今回の応答メッセージIDをすべて保存（次回の入力で通知）
+      chat.lastIds = sentMessageIds;
+
     } catch (e) {
       console.error(m.id, ': An error occurred during processing\n', e);
       await m.reply(`ERROR:\n\`\`\`\n${e}\n\`\`\``);
