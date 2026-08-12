@@ -194,8 +194,8 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       const toolCount = new Map<string, number>();
 
-      // ★ 直近の会話を取得（最大20件、合計7,000文字以内）
-      const recentMessages = await m.channel.messages.fetch({ limit: 20, before: m.id });
+      // ★ 直近の会話を取得（最大35件、合計7,000文字以内）
+      const recentMessages = await m.channel.messages.fetch({ limit: 35, before: m.id });
       const sorted = [...recentMessages.values()]
         .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
