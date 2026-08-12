@@ -200,20 +200,33 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       let contextLength = 0;
       const MAX_CONTEXT_LEN = 7000;
 
+      if (chat.lastIds.length > 0) {
+        const sysLine = `[System] あなたの前回のメッセージID: ${chat.lastIds.join(', ')}`;
+        contextLines.push(sysLine);
+        contextLength += sysLine.length + 1;
+      }
+
       for (const msg of sorted) {
         if (msg.id === m.id) continue;
+
+        const time = msg.createdAt.toLocaleTimeString('ja-JP', {
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+        });
+
         let line: string;
         if (msg.author.id === client.user?.id || msg.author.id === fluxer.user?.id) {
           // Bot自身のメッセージ → IDのみ（内容はスレッドに保持されている）
-          line = `[${msg.id}] (あなたの応答)`;
+          line = `[${msg.id}] ${time} (あなたの応答)`;
         } else {
           const replyNote = msg.reference ? ` (reply to ${msg.reference.messageId})` : '';
-          line = `[${msg.id}] ${msg.member?.displayName ?? msg.author.displayName}: ${msg.content}${replyNote}`;
+          const user = msg.author;
+          line = `[${msg.id}] ${time} ${msg.member?.displayName ?? user.displayName} (${user.username}, ${user.id}): ${msg.content}${replyNote}`;
         }
-        if (contextLength + line.length + 1 > MAX_CONTEXT_LEN) break; // +1 for newline
+        if (contextLength + line.length + 1 > MAX_CONTEXT_LEN) break;
         contextLines.push(line);
         contextLength += line.length + 1;
       }
+
       const contextBlock = contextLines.length > 0
         ? contextLines.join('\n') + '\n'
         : '';
@@ -225,18 +238,12 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
       }));
 
-      // ★ リプライのメタ情報と、前回の自分のメッセージIDを追加
       const replyMeta = m.reference?.messageId ? ` (reply to ${m.reference.messageId})` : '';
-      const lastIdsInfo = chat.lastIds.length > 0
-        ? `\nあなたの前回のメッセージID: ${chat.lastIds.join(', ')}`
-        : '';
-
       const input = (
         rep + contextBlock +
         `from: ${m.member?.displayName ?? m.author.displayName} (${m.author.username}, ${m.author.id})${replyMeta}\n` +
         m.content.replaceAll('<@1379433738143924284>', '').replaceAll('<@1493977173863738082>', '')
-      ) + lastIdsInfo;
-
+      );
       console.log(m.id, input);
 
       const res = chat.t.sendMessage({
