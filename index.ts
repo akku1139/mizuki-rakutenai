@@ -209,6 +209,10 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         contextLength += sysLine.length + 1;
       }
 
+      // 連続投稿の検出用
+      let lastAuthorId: string | null = null;
+
+      // 過去メッセージの整形
       for (const msg of sorted) {
         if (msg.id === m.id) continue;
 
@@ -216,28 +220,55 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
           hour: '2-digit', minute: '2-digit', second: '2-digit',
         });
 
-        let line: string;
+        // AI自身のメッセージ
         if (msg.author.id === client.user?.id || msg.author.id === fluxer.user?.id) {
-          line = `[${msg.id}] ${time} (あなたの応答)`;
+          const line = `[${msg.id}] ${time} (あなたの応答)`;
+          if (contextLength + line.length + 1 > MAX_CONTEXT_LEN) break;
+          contextLines.push(line);
+          contextLength += line.length + 1;
+          lastAuthorId = msg.author.id;   // 連続判定には使わないがリセットのため更新
+          continue;
+        }
+
+        const isBot = msg.author.bot;
+        const sameAuthor = msg.author.id === lastAuthorId;
+
+        // 返信・転送のマーク（返信はIDの直後に配置）
+        const replyNote = msg.reference ? `(reply to ${msg.reference.messageId}) ` : '';
+        const forwardNote = msg.messageSnapshots && msg.messageSnapshots.size > 0 ? ' (forwarded)' : '';
+
+        let line: string;
+
+        if (sameAuthor) {
+          // 連続投稿: ユーザー情報を省略し、ID・返信マーク・時刻・本文のみ
+          line = `[${msg.id}] ${replyNote}${time} ${msg.content}${forwardNote}`;
         } else {
-          const replyNote = msg.reference ? ` (reply to ${msg.reference.messageId})` : '';
-          const forwardNote = msg.messageSnapshots && msg.messageSnapshots.size > 0 ? ' (forwarded)' : '';
+          // 通常表示
+          const botPrefix = isBot ? '[BOT] ' : '';
           const user = msg.author;
-          line = `[${msg.id}] ${time} ${msg.member?.displayName ?? user.displayName} (${user.username}, ${user.id}): ${msg.content}${replyNote}${forwardNote}`;
+          line = `[${msg.id}] ${replyNote}${time} ${botPrefix}${msg.member?.displayName ?? user.displayName} (${user.username}, ${user.id}): ${msg.content}${forwardNote}`;
         }
 
         if (contextLength + line.length + 1 > MAX_CONTEXT_LEN) break;
         contextLines.push(line);
         contextLength += line.length + 1;
+        lastAuthorId = msg.author.id;
       }
 
       const nowTime = m.createdAt.toLocaleTimeString('ja-JP', {
         hour: '2-digit', minute: '2-digit', second: '2-digit',
       });
-      const replyNote = m.reference ? ` (reply to ${m.reference.messageId})` : '';
-      const forwardNote = m.messageSnapshots && m.messageSnapshots.size > 0 ? ' (forwarded)' : '';
-      const user = m.author;
-      const currentLine = `[${m.id}] ${nowTime} ${m.member?.displayName ?? user.displayName} (${user.username}, ${user.id}): ${m.content}${replyNote}${forwardNote}`;
+      const curReplyNote = m.reference ? `(reply to ${m.reference.messageId}) ` : '';
+      const curForwardNote = m.messageSnapshots && m.messageSnapshots.size > 0 ? ' (forwarded)' : '';
+      const curSameAuthor = m.author.id === lastAuthorId;
+
+      let currentLine: string;
+      if (curSameAuthor) {
+        currentLine = `[${m.id}] ${curReplyNote}${nowTime} ${m.content}${curForwardNote}`;
+      } else {
+        const curBotPrefix = m.author.bot ? '[BOT] ' : '';
+        currentLine = `[${m.id}] ${curReplyNote}${nowTime} ${curBotPrefix}${m.member?.displayName ?? m.author.displayName} (${m.author.username}, ${m.author.id}): ${m.content}${curForwardNote}`;
+      }
       contextLines.push(currentLine);
 
       const contextBlock = contextLines.join('\n') + '\n';
