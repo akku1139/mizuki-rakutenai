@@ -194,8 +194,18 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       const toolCount = new Map<string, number>();
 
-      // ★ 直近の会話を取得（最大35件、合計7,000文字以内）
-      const recentMessages = await m.channel.messages.fetch({ limit: 35, before: m.id });
+      // ★ 最後に自分が投稿したメッセージID（存在すれば after に指定）
+      const lastBotMsgId = chat.lastIds.length > 0
+        ? chat.lastIds[chat.lastIds.length - 1]  // 一番最後に送信したID
+        : undefined;
+
+      // 直近のメッセージを取得（自分が最後に投稿したIDより後だけ）
+      const recentMessages = await m.channel.messages.fetch({
+        limit: 35,
+        before: m.id,
+        after: lastBotMsgId,
+      });
+
       const sorted = [...recentMessages.values()]
         .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
@@ -203,6 +213,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       let contextLength = 0;
       const MAX_CONTEXT_LEN = 7000;
 
+      // システム行: 前回の自分のメッセージID（常に表示）
       if (chat.lastIds.length > 0) {
         const sysLine = `[System] あなたの前回のメッセージID: ${chat.lastIds.join(', ')}`;
         contextLines.push(sysLine);
@@ -219,16 +230,6 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         const time = msg.createdAt.toLocaleTimeString('ja-JP', {
           hour: '2-digit', minute: '2-digit', second: '2-digit',
         });
-
-        // AI自身のメッセージ
-        if (msg.author.id === client.user?.id || msg.author.id === fluxer.user?.id) {
-          const line = `[${msg.id}] ${time} (あなたの応答)`;
-          if (contextLength + line.length + 1 > MAX_CONTEXT_LEN) break;
-          contextLines.push(line);
-          contextLength += line.length + 1;
-          lastAuthorId = msg.author.id;   // 連続判定には使わないがリセットのため更新
-          continue;
-        }
 
         const isBot = msg.author.bot;
         const sameAuthor = msg.author.id === lastAuthorId;
@@ -259,7 +260,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         hour: '2-digit', minute: '2-digit', second: '2-digit',
       });
       const curReplyNote = m.reference ? `(reply to ${m.reference.messageId}) ` : '';
-      const curForwardNote = m.messageSnapshots && m.messageSnapshots.size > 0 ? ' (forwarded)' : '';
+      const curForwardNote = m.messageSnapshots?.size > 0 ? ' (forwarded)' : '';
       const curSameAuthor = m.author.id === lastAuthorId;
 
       let currentLine: string;
