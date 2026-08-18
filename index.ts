@@ -218,7 +218,7 @@ ${(await m.guild?.emojis.fetch())?.map(e => e.toString()).join('\n')}
         .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
       let contextLines: string[] = [];
-      let contextLength = 0;
+      let contextLength = rep.length;
       const MAX_CONTEXT_LEN = 7000;
 
       // システム行: 前回の自分のメッセージID（常に表示）
