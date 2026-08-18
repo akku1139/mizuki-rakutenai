@@ -363,7 +363,12 @@ ${(await m.guild?.emojis.fetch())?.map(e => e.toString()).join('\n')}
             break;
 
           case 'error':
-            await m.reply(`ERROR:\n\`\`\`json\n${JSON.stringify(gen, null, 2)}\n\`\`\``);
+            text += `ERROR:\n\`\`\`json\n${JSON.stringify(gen, null, 2)}\n\`\`\`\n`;
+            chatStore.delete(contextKey);
+            break;
+
+          case 'usage':
+            console.log('usage:', gen.usage);
             break;
 
           default:
