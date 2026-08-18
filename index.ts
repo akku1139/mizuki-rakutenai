@@ -203,10 +203,11 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       const recentMessages = await m.channel.messages.fetch({
         limit: 35,
         before: m.id,
-        after: lastBotMsgId,
+        // after: lastBotMsgId,
       });
 
       const sorted = [...recentMessages.values()]
+        .filter(msg => !lastBotMsgId || BigInt(msg.id) > BigInt(lastBotMsgId))
         .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
       let contextLines: string[] = [];
