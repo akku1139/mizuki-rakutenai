@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel, type SendableChannels, type Snowflake, WebhookClient, AttachmentBuilder, type MessagePayloadOption } from 'discord.js';
+import { Client, GatewayIntentBits, type Message, TextChannel, ThreadChannel, type OmitPartialGroupDMChannel, type SendableChannels, type Snowflake, WebhookClient, AttachmentBuilder, type MessagePayloadOption, type Guild, type MessageReaction, type PartialMessageReaction, type User as DiscordUser, type PartialUser } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
 import { MexcWebsocketClient } from './mexc.ts';
 import process from 'node:process';
@@ -18,6 +18,7 @@ const client = new Client({ intents: [
   GatewayIntentBits.MessageContent,
   GatewayIntentBits.GuildMembers,
   GatewayIntentBits.GuildExpressions,
+  GatewayIntentBits.GuildMessageReactions,
 ] });
 
 // 1493977173863738082
@@ -28,6 +29,7 @@ const fluxer = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildExpressions,
+    GatewayIntentBits.GuildMessageReactions,
   ],
   rest: {
     // do not add / at the last
@@ -520,23 +522,71 @@ const saveWhMap = async () => {
 
 // TODO:
 // m.type === MessageType.UserJoin
-// emoji
-// mentions
+
+/** Lost on restart, and reactions only fire while discord.js still caches the message. */
+const dToF = new Map<Snowflake, Snowflake>();
+const fToD = new Map<Snowflake, Snowflake>();
+const linkMessages = (discordId: Snowflake, fluxerId: Snowflake) => {
+  dToF.set(discordId, fluxerId);
+  fToD.set(fluxerId, discordId);
+  for (const m of [dToF, fToD]) {
+    if (m.size <= 5000) continue;
+    const oldest = m.keys().next();
+    if (!oldest.done) m.delete(oldest.value);
+  }
+};
+
+/** Each WebhookClient owns its own REST rate limit buckets. */
+const discordWHs = new Map<Snowflake, WebhookClient>();
+
+const guildOfChannel = (c: Client, channelId: Snowflake): Guild | undefined => {
+  const ch = c.channels.cache.get(channelId);
+  return ch !== undefined && 'guild' in ch ? ch.guild : undefined;
+};
+
+const convertEmojis = (content: string, target: Guild | undefined): string =>
+  target === undefined ? content : content.replace(/<a?:([^:\s]+):\d+>/g, (_full, name: string) =>
+    target.emojis.cache.find(e => e.name === name)?.toString() ?? `:${name}:`);
+
+/** Sticker IDs are server local, and Discord webhooks cannot send stickers at all. */
+const stickerLinks = (stickers: Message['stickers']): string =>
+  [...stickers.values()].map(s => `\n${s.url}`).join('');
+
+const bridgeReactions = (from: Client, to: Client, idMap: Map<Snowflake, Snowflake>, whMap: Record<string, { targetClannelID: string }>): void => {
+  const handle = async (r: MessageReaction | PartialMessageReaction, u: DiscordUser | PartialUser, remove: boolean) => {
+    // Our own mirrored reaction is in the count too.
+    if (u.bot || (remove && (r.count ?? 0) - (r.me ? 1 : 0) > 0)) return;
+    const targetId = idMap.get(r.message.id);
+    const wh = whMap[r.message.channelId];
+    if (targetId === undefined || !wh) return;
+    const ch = await to.channels.fetch(wh.targetClannelID);
+    if (!ch?.isTextBased()) return;
+    const msg = await ch.messages.fetch(targetId);
+    const emoji = r.emoji.id === null ? r.emoji.name : msg.guild?.emojis.cache.find(e => e.name === r.emoji.name);
+    if (!emoji) return;
+    if (remove) await msg.reactions.cache.get(typeof emoji === 'string' ? emoji : emoji.id)?.users.remove();
+    else await msg.react(emoji);
+  };
+  from.on('messageReactionAdd', (r, u) => void handle(r, u, false));
+  from.on('messageReactionRemove', (r, u) => void handle(r, u, true));
+};
 
 client.on('messageCreate', async m => {
   const whInfo = whMapDiscord[m.channelId];
   if (!whInfo || m.author.id === whInfo.whID) return;
   console.log('sending a message to fluxer:', m.id);
   const targetInfo = whMapFluxer[whInfo.targetClannelID];
+  const repliedId = dToF.get(m.reference?.messageId ?? '');
 
   const formData = new FormData();
   formData.append('payload_json', JSON.stringify({
-    allowedMentions: {
+    allowed_mentions: {
       parse: [], // とりあえずメンション無し
     },
+    message_reference: repliedId === undefined ? undefined : { message_id: repliedId },
     username: `${m.member?.nickname ?? m.author.displayName}#Discord`,
     avatar_url: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
-    content: m.content,
+    content: convertEmojis(m.content, guildOfChannel(fluxer, whInfo.targetClannelID)) + stickerLinks(m.stickers),
     embeds: m.embeds,
     attachments: Array.from(m.attachments.values()).map((a, i) => ({
       id: i,
@@ -559,11 +609,16 @@ client.on('messageCreate', async m => {
   (await Promise.all(m.attachments.map<Promise<[string, Blob]>>(async a => [a.name, await (await fetch(a.proxyURL)).blob()])))
     .forEach((f, i) => formData.append(`files[${i}]`, f[1], f[0]));
 
-  const res = await fetch(`https://api.fluxer.app/webhooks/${targetInfo.whID}/${targetInfo.whToken}`, {
+  const res = await fetch(`https://api.fluxer.app/webhooks/${targetInfo.whID}/${targetInfo.whToken}?wait=true`, {
     method: "POST",
     body: formData,
   });
-  if (!res.ok) console.error('fluxer webhook error:', await res.json());
+  if (!res.ok) {
+    // Error bodies are not always JSON, e.g. a proxy 502.
+    console.error('fluxer webhook error:', res.status, await res.text());
+    return;
+  }
+  linkMessages(m.id, (await res.json() as { id: Snowflake }).id);
 });
 
 fluxer.on('clientReady', readyClient => {
@@ -586,20 +641,33 @@ fluxer.on('messageCreate', async m => {
   }
   console.log('sending a message to discord:', m.id);
   const targetInfo = whMapDiscord[whInfo.targetClannelID];
-  const discordWH = new WebhookClient({ id: targetInfo.whID, token: targetInfo.whToken });
-  await discordWH.send({
+  const targetGuild = guildOfChannel(client, whInfo.targetClannelID);
+  const repliedId = fToD.get(m.reference?.messageId ?? '');
+  let discordWH = discordWHs.get(targetInfo.whID);
+  if (discordWH === undefined) {
+    discordWH = new WebhookClient({ id: targetInfo.whID, token: targetInfo.whToken });
+    discordWHs.set(targetInfo.whID, discordWH);
+  }
+  // Discord webhooks cannot reply.
+  const replyLine = repliedId === undefined || targetGuild === undefined ? ''
+    : `-# ↩ https://discord.com/channels/${targetGuild.id}/${whInfo.targetClannelID}/${repliedId}\n`;
+  const sent = await discordWH.send({
     allowedMentions: {
       parse: [], // とりあえずメンション無し
     },
     username: `${m.member?.nickname ?? m.author.displayName}#Fluxer`,
     avatarURL: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
-    content: m.content,
+    content: (replyLine + convertEmojis(m.content, targetGuild) + stickerLinks(m.stickers)).slice(0, 2000),
     embeds: m.embeds,
     files: [...m.attachments.values()],
     tts: m.tts,
     withComponents: false,
   });
+  linkMessages(sent.id, m.id);
 });
+
+bridgeReactions(client, fluxer, dToF, whMapDiscord);
+bridgeReactions(fluxer, client, fToD, whMapFluxer);
 
 
 /// logging feature
