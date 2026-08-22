@@ -557,12 +557,12 @@ const convertUserMentions = async (m: Message): Promise<string> => {
   await Promise.all([...new Set(ids)].map(async id => {
     const mentioned = m.mentions.users.get(id);
     if (mentioned !== undefined) {
-      usernames.set(id, mentioned.username);
+      usernames.set(id, mentioned.displayName);
       return;
     }
 
     try {
-      usernames.set(id, (await m.client.users.fetch(id)).username);
+      usernames.set(id, (await m.client.users.fetch(id)).displayName);
     } catch {
       // Keep an unresolvable mention intact instead of silently changing its text.
     }
