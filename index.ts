@@ -548,6 +548,30 @@ const convertEmojis = (content: string, target: Guild | undefined): string =>
   target === undefined ? content : content.replace(/<a?:([^:\s]+):\d+>/g, (_full, name: string) =>
     target.emojis.cache.find(e => e.name === name)?.toString() ?? `:${name}:`);
 
+/** User IDs are local to each service, so mirror mentions as readable text. */
+const convertUserMentions = async (m: Message): Promise<string> => {
+  const mentionPattern = /<@!?(\d+)>/g;
+  const ids = [...m.content.matchAll(mentionPattern)].map(match => match[1]);
+  const usernames = new Map<string, string>();
+
+  await Promise.all([...new Set(ids)].map(async id => {
+    const mentioned = m.mentions.users.get(id);
+    if (mentioned !== undefined) {
+      usernames.set(id, mentioned.displayName);
+      return;
+    }
+
+    try {
+      usernames.set(id, (await m.client.users.fetch(id)).displayName);
+    } catch {
+      // Keep an unresolvable mention intact instead of silently changing its text.
+    }
+  }));
+
+  return m.content.replace(mentionPattern, (full, id: string) =>
+    usernames.has(id) ? `@${usernames.get(id)}` : full);
+};
+
 /** Sticker IDs are server local, and Discord webhooks cannot send stickers at all. */
 const stickerLinks = (stickers: Message['stickers']): string =>
   [...stickers.values()].map(s => `\n${s.url}`).join('');
@@ -577,6 +601,7 @@ client.on('messageCreate', async m => {
   console.log('sending a message to fluxer:', m.id);
   const targetInfo = whMapFluxer[whInfo.targetClannelID];
   const repliedId = dToF.get(m.reference?.messageId ?? '');
+  const content = await convertUserMentions(m);
 
   const formData = new FormData();
   formData.append('payload_json', JSON.stringify({
@@ -586,7 +611,7 @@ client.on('messageCreate', async m => {
     message_reference: repliedId === undefined ? undefined : { message_id: repliedId },
     username: `${m.member?.nickname ?? m.author.displayName}#Discord`,
     avatar_url: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
-    content: convertEmojis(m.content, guildOfChannel(fluxer, whInfo.targetClannelID)) + stickerLinks(m.stickers),
+    content: convertEmojis(content, guildOfChannel(fluxer, whInfo.targetClannelID)) + stickerLinks(m.stickers),
     embeds: m.embeds,
     attachments: Array.from(m.attachments.values()).map((a, i) => ({
       id: i,
@@ -643,6 +668,7 @@ fluxer.on('messageCreate', async m => {
   const targetInfo = whMapDiscord[whInfo.targetClannelID];
   const targetGuild = guildOfChannel(client, whInfo.targetClannelID);
   const repliedId = fToD.get(m.reference?.messageId ?? '');
+  const content = await convertUserMentions(m);
   let discordWH = discordWHs.get(targetInfo.whID);
   if (discordWH === undefined) {
     discordWH = new WebhookClient({ id: targetInfo.whID, token: targetInfo.whToken });
@@ -657,7 +683,7 @@ fluxer.on('messageCreate', async m => {
     },
     username: `${m.member?.nickname ?? m.author.displayName}#Fluxer`,
     avatarURL: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
-    content: (replyLine + convertEmojis(m.content, targetGuild) + stickerLinks(m.stickers)).slice(0, 2000),
+    content: (replyLine + convertEmojis(content, targetGuild) + stickerLinks(m.stickers)).slice(0, 2000),
     embeds: m.embeds,
     files: [...m.attachments.values()],
     tts: m.tts,
