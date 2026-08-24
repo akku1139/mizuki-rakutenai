@@ -18,6 +18,7 @@ import { buildContextBlock } from './context.ts';
 import { OpenAICompatChat } from './openai.ts';
 import { getUserProvider, loadPrefs, setUserProvider } from './prefs.ts';
 import { buildSystemPrompt } from './prompt.ts';
+import { aitoolsSpec } from './tools.ts';
 import type { AIEvent, ChatContents, ChatSession, ProviderName } from './types.ts';
 import { isProviderName, PROVIDERS } from './types.ts';
 
@@ -62,17 +63,27 @@ const defaultProvider = (): ProviderName => {
 
 /**
  * チャンネルごとの新しいセッションを作る。
- * - rakutenai: システムプロンプトは毎回の入力の先頭に結合して渡す
+ * - rakutenai: システムプロンプトは毎回の入力の先頭に結合して渡す (サーバー側でツールを提供)
  * - openai: 環境変数 OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL を使用し、
- *   システムプロンプトは setSystemPrompt で渡す
+ *   システムプロンプトは setSystemPrompt で渡す。ツール (function calling) もこちらにのみ渡す
  */
-export const createChatSession = async (provider: ProviderName): Promise<ChatSession> => {
+export const createChatSession = async (
+  provider: ProviderName,
+  meta?: { guildName?: string, channelName?: string },
+): Promise<ChatSession> => {
   if (provider === 'openai') {
-    return new OpenAICompatChat({
-      baseUrl: process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1',
-      apiKey: process.env['OPENAI_API_KEY'] ?? '',
-      model: process.env['OPENAI_MODEL'] ?? 'gpt-4o-mini',
-    });
+    const chat = new OpenAICompatChat(
+      {
+        baseUrl: process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1',
+        apiKey: process.env['OPENAI_API_KEY'] ?? '',
+        model: process.env['OPENAI_MODEL'] ?? 'gpt-4o-mini',
+      },
+      aitoolsSpec,
+    );
+    if (meta?.guildName !== undefined && meta.channelName !== undefined) {
+      chat.setServerContext(meta.guildName, meta.channelName);
+    }
+    return chat;
   }
   return new RakutenAIChat(await (await User.create()).createThread());
 };
@@ -82,8 +93,11 @@ const newEntry = async (
   provider: ProviderName,
   m: OmitPartialGroupDMChannel<Message<boolean>>,
 ): Promise<{ entry: ChatEntry, rep: string }> => {
-  const t = await createChatSession(provider);
   const rep = await buildSystemPrompt(m.guild);
+  const t = await createChatSession(provider, {
+    guildName: m.guild?.name,
+    channelName: m.channel.isDMBased() ? undefined : m.channel.name,
+  });
   t.setSystemPrompt?.(rep);
   return {
     entry: { t, q: Promise.resolve(), lastIds: [], provider },
@@ -217,6 +231,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
           { type: 'text', text: input },
           ...(files.map(f => ({ type: 'file', file: f } as const))),
         ],
+        meta: { msg: m },
       });
 
       let text = '';
@@ -279,6 +294,13 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
           case 'tool-call-detail':
             console.log('fc:', gen);
             toolCount.set(gen.data.name, (toolCount.get(gen.data.name) ?? 0) + 1);
+            // 進捗表示 (evex-quotesと同様)
+            await m.channel.send(`-# ${gen.data.description !== '' ? `${gen.data.description} ` : ''}(${gen.data.name})...`);
+            break;
+
+          case 'tool-result':
+            console.log('tool result:', gen.data);
+            m.channel.sendTyping();
             break;
 
           case 'error':

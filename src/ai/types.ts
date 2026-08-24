@@ -25,6 +25,12 @@ export type AIEvent =
       description: string,
       groupId: string,
     } }
+  | { type: 'tool-result', data: {
+      name: string,
+      ok: boolean,
+      /** ok=falseの場合のエラー情報 */
+      value?: unknown,
+    } }
   | { type: 'image-thumbnail', url: string }
   | { type: 'image', url: string }
   | { type: 'error', code: string, message: string, trace: {
@@ -44,6 +50,16 @@ export type ChatContents = Array<
   | { type: 'file', file: ChatFile }
 >;
 
+/** プロバイダ非依存のツール群。definitionsはOpenAI function calling形式 */
+export interface ToolSpec {
+  definitions: Array<Record<string, unknown>>,
+  execute(
+    name: string,
+    args: Record<string, unknown>,
+    meta: unknown,
+  ): Promise<[true, unknown] | [false, { error: string }]>,
+}
+
 /** 1チャンネルごとの会話セッション。RakutenAIのスレッド or クライアント側履歴。 */
 export interface ChatSession {
   /** ログ表示用のラベル (例: "rakutenai", "openai/gpt-4o-mini") */
@@ -53,6 +69,8 @@ export interface ChatSession {
   sendMessage(message: {
     mode?: 'USER_INPUT' | 'DEEP_THINK' | 'AI_READ',
     contents: ChatContents,
+    /** ツール実行時に渡されるコンテキスト (呼び出し元メッセージなど) */
+    meta?: unknown,
   }): AsyncGenerator<AIEvent>,
   /** 履歴をクライアント側で持つバックエンド (OpenAI互換) のみ実装 */
   setSystemPrompt?(text: string): void,
