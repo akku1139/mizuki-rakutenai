@@ -16,6 +16,7 @@ import { whMapFluxer } from '../fluxsync/state.ts';
 import { createFileFromUrl, isEffectivelyEmpty, splitLongString } from '../utils.ts';
 import { buildContextBlock } from './context.ts';
 import { OpenAICompatChat } from './openai.ts';
+import { getUserProvider, loadPrefs, setUserProvider } from './prefs.ts';
 import { buildSystemPrompt } from './prompt.ts';
 import type { AIEvent, ChatContents, ChatSession, ProviderName } from './types.ts';
 import { isProviderName, PROVIDERS } from './types.ts';
@@ -122,7 +123,9 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
     && (m.channel instanceof TextChannel || m.channel instanceof ThreadChannel)
     && m.guild !== null
   ) {
-    const contextKey = whMapFluxer[m.channelId] ? whMapFluxer[m.channelId].targetClannelID : m.channelId;
+    // セッションは「チャンネル x ユーザー」単位。Fluxer同期チャンネルはDiscord側のIDに正規化する。
+    const channelKey = whMapFluxer[m.channelId] ? whMapFluxer[m.channelId].targetClannelID : m.channelId;
+    const contextKey = `${channelKey}:${m.author.id}`;
 
     if (m.content === `<@${DISCORD_USER_ID}> clear` || m.content === `<@${FLUXER_USER_ID}> clear`) {
       chatStore.delete(contextKey);
@@ -134,18 +137,23 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       return;
     }
 
-    // =aimodel <provider>: このチャンネルのAIバックエンドを切り替える
-    const modelMatch = m.content.match(`^<@(${DISCORD_USER_ID}|${FLUXER_USER_ID})> =aimodel (\\S+)$`);
+    // aimodel [provider]: 呼び出したユーザーのAIバックエンドを表示/切り替える (=aimodel でも可)
+    const modelMatch = m.content.match(`^<@(${DISCORD_USER_ID}|${FLUXER_USER_ID})> =?aimodel(\\s+(\\S+))?$`);
     if (modelMatch) {
-      const p = modelMatch[2];
+      const p = modelMatch[3];
+      if (p === undefined) {
+        const current = getUserProvider(m.author.id) ?? defaultProvider();
+        await m.reply(`your AI model: \`${current}\`\navailable: ${PROVIDERS.map(x => `\`${x}\``).join(', ')}\nusage: \`@bot aimodel <provider>\``);
+        return;
+      }
       if (!isProviderName(p)) {
         await m.reply(`unknown provider: \`${p}\`\navailable: ${PROVIDERS.map(x => `\`${x}\``).join(', ')}`);
         return;
       }
       try {
-        const { entry } = await newEntry(p, m);
-        chatStore.set(contextKey, entry);
-        await m.reply(`AI model switched to \`${entry.t.label}\` (${p}).`);
+        await setUserProvider(m.author.id, p); // 永続化
+        chatStore.delete(contextKey);          // 履歴はリセットして新モデルで開始
+        await m.reply(`AI model switched to \`${p}\`. chat context was reset.`);
       } catch (e) {
         await m.reply(`failed to switch: ${e}`);
       }
@@ -155,7 +163,8 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
     let rep: string = '';
     let entry = chatStore.get(contextKey);
     if (entry === undefined) {
-      ({ entry, rep } = await newEntry(defaultProvider(), m));
+      // ユーザー単位の設定 > env (AI_PROVIDER) の既定
+      ({ entry, rep } = await newEntry(getUserProvider(m.author.id) ?? defaultProvider(), m));
       chatStore.set(contextKey, entry);
     }
 
@@ -308,4 +317,5 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 export const setupAI = (): void => {
   discord.on('messageCreate', aiHandler);
   fluxer.on('messageCreate', aiHandler);
+  void loadPrefs();
 };
