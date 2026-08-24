@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/// Mention-triggered AI assistant (RakutenAI thread per channel).
+/// Mention-triggered AI assistant (RakutenAI / OpenAI互換API).
 
 import {
   type Message,
@@ -10,19 +10,87 @@ import {
   type Snowflake,
 } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
+import process from 'node:process';
 import { DISCORD_USER_ID, discord, FLUXER_USER_ID, fluxer } from '../clients.ts';
 import { whMapFluxer } from '../fluxsync/state.ts';
 import { createFileFromUrl, isEffectivelyEmpty, splitLongString } from '../utils.ts';
 import { buildContextBlock } from './context.ts';
+import { OpenAICompatChat } from './openai.ts';
 import { buildSystemPrompt } from './prompt.ts';
+import type { AIEvent, ChatContents, ChatSession, ProviderName } from './types.ts';
+import { isProviderName, PROVIDERS } from './types.ts';
 
-interface ChatState {
-  t: Thread,
-  q: Promise<void>,
-  lastIds: Snowflake[],
+/** RakutenAIのThreadをChatSessionに適合させる */
+class RakutenAIChat implements ChatSession {
+  readonly label = 'rakutenai';
+  readonly id: string;
+  readonly t: Thread;
+
+  constructor(t: Thread) {
+    this.t = t;
+    this.id = t.id;
+  }
+
+  uploadFile(opts: { file: File, isImage?: boolean }) {
+    return this.t.uploadFile(opts);
+  }
+
+  async *sendMessage(message: {
+    mode?: 'USER_INPUT' | 'DEEP_THINK' | 'AI_READ',
+    contents: ChatContents,
+  }): AsyncGenerator<AIEvent> {
+    yield* this.t.sendMessage({
+      mode: message.mode ?? 'USER_INPUT',
+      contents: message.contents,
+    } as never);
+  }
 }
 
-const chatStore: Map<string, ChatState> = new Map();
+interface ChatEntry {
+  t: ChatSession,
+  q: Promise<void>,
+  lastIds: Snowflake[],
+  provider: ProviderName,
+}
+
+/** 既定のプロバイダ (env: AI_PROVIDER、未指定なら rakutenai) */
+const defaultProvider = (): ProviderName => {
+  const v = process.env['AI_PROVIDER'] ?? 'rakutenai';
+  return isProviderName(v) ? v : 'rakutenai';
+};
+
+/**
+ * チャンネルごとの新しいセッションを作る。
+ * - rakutenai: システムプロンプトは毎回の入力の先頭に結合して渡す
+ * - openai: 環境変数 OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL を使用し、
+ *   システムプロンプトは setSystemPrompt で渡す
+ */
+export const createChatSession = async (provider: ProviderName): Promise<ChatSession> => {
+  if (provider === 'openai') {
+    return new OpenAICompatChat({
+      baseUrl: process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1',
+      apiKey: process.env['OPENAI_API_KEY'] ?? '',
+      model: process.env['OPENAI_MODEL'] ?? 'gpt-4o-mini',
+    });
+  }
+  return new RakutenAIChat(await (await User.create()).createThread());
+};
+
+/** 新規エントリを作成する。RakutenAIの場合はシステムプロンプトを返す */
+const newEntry = async (
+  provider: ProviderName,
+  m: OmitPartialGroupDMChannel<Message<boolean>>,
+): Promise<{ entry: ChatEntry, rep: string }> => {
+  const t = await createChatSession(provider);
+  const rep = await buildSystemPrompt(m.guild);
+  t.setSystemPrompt?.(rep);
+  return {
+    entry: { t, q: Promise.resolve(), lastIds: [], provider },
+    rep: t.setSystemPrompt == null ? rep : '',
+  };
+};
+
+const chatStore = new Map<string, ChatEntry>();
 
 let aiWaitingJobs = 0;
 let aiProcessingJobs = 0;
@@ -62,25 +130,40 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       return;
     }
     if (m.content === `<@${DISCORD_USER_ID}> chatlist` || m.content === `<@${FLUXER_USER_ID}> chatlist`) {
-      await m.reply(`job queue: \`{ waiting: ${aiWaitingJobs}, processing : ${aiProcessingJobs} }\`\ncontext list:\n\`\`\`json\n${JSON.stringify(Array.from(chatStore.keys()), null, 2)}\n\`\`\``);
+      await m.reply(`job queue: \`{ waiting: ${aiWaitingJobs}, processing : ${aiProcessingJobs} }\`\ncontext list:\n\`\`\`json\n${JSON.stringify(Array.from(chatStore.entries()).map(([k, v]) => [k, v.provider, v.t.label]), null, 2)}\n\`\`\``);
+      return;
+    }
+
+    // =aimodel <provider>: このチャンネルのAIバックエンドを切り替える
+    const modelMatch = m.content.match(`^<@(${DISCORD_USER_ID}|${FLUXER_USER_ID})> =aimodel (\\S+)$`);
+    if (modelMatch) {
+      const p = modelMatch[2];
+      if (!isProviderName(p)) {
+        await m.reply(`unknown provider: \`${p}\`\navailable: ${PROVIDERS.map(x => `\`${x}\``).join(', ')}`);
+        return;
+      }
+      try {
+        const { entry } = await newEntry(p, m);
+        chatStore.set(contextKey, entry);
+        await m.reply(`AI model switched to \`${entry.t.label}\` (${p}).`);
+      } catch (e) {
+        await m.reply(`failed to switch: ${e}`);
+      }
       return;
     }
 
     let rep: string = '';
-    const chat = chatStore.get(contextKey) ?? await (async () => {
-      const newChat = {
-        t: await (await User.create()).createThread(),
-        q: Promise.resolve(),
-        lastIds: [] as Snowflake[],
-      };
-      chatStore.set(contextKey, newChat);
-      rep = await buildSystemPrompt(m.guild);
-      return newChat;
-    })();
+    let entry = chatStore.get(contextKey);
+    if (entry === undefined) {
+      ({ entry, rep } = await newEntry(defaultProvider(), m));
+      chatStore.set(contextKey, entry);
+    }
 
-    const previousTask = chat.q;
+    const { t: chat } = entry;
+
+    const previousTask = entry.q;
     let resolveNext: () => void = () => console.error(m.id, 'Execute off-queue');
-    chat.q = new Promise((resolve) => {
+    entry.q = new Promise((resolve) => {
       resolveNext = resolve;
     });
 
@@ -96,34 +179,30 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       const toolCount = new Map<string, number>();
 
       // ★ 最後に自分が投稿したメッセージID（存在すれば after に指定）
-      const lastBotMsgId = chat.lastIds.length > 0
-        ? chat.lastIds[chat.lastIds.length - 1]  // 一番最後に送信したID
+      const lastBotMsgId = entry.lastIds.length > 0
+        ? entry.lastIds[entry.lastIds.length - 1]  // 一番最後に送信したID
         : undefined;
 
       // 直近のメッセージを取得（自分が最後に投稿したIDより後だけ）
-      const recentMessages = await m.channel.messages.fetch({
-        limit: 35,
-        before: m.id,
-        // after: lastBotMsgId,
-      });
+      const recentMessages = await m.channel.messages.fetch({ limit: 35, before: m.id });
 
       const sorted = [...recentMessages.values()]
         .filter(msg => !lastBotMsgId || BigInt(msg.id) > BigInt(lastBotMsgId))
         .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
-      const contextBlock = buildContextBlock(m, sorted, chat.lastIds, rep.length);
+      const contextBlock = buildContextBlock(m, sorted, entry.lastIds, rep.length);
 
       const files = await Promise.all(m.attachments.map(async f => {
         console.log('file:', f.url, f.name);
         const file = await createFileFromUrl(f.proxyURL, f.name);
-        return chat.t.uploadFile({ file, isImage: file.type.startsWith('image/') })
+        return chat.uploadFile({ file, isImage: file.type.startsWith('image/') })
       }));
 
       const input = rep + contextBlock;
 
-      console.log(m.id, input);
+      console.log(m.id, `[${chat.label}]`, input);
 
-      const res = chat.t.sendMessage({
+      const res = chat.sendMessage({
         mode: "USER_INPUT",
         contents: [
           { type: 'text', text: input },
@@ -209,12 +288,12 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       }
 
       text = text.trim();
-      text += `\n-# model: rakutenai ${toolCount.size > 0 ? `(${Array.from(toolCount, ([k, v]) => `${k}: ${v}`).join(', ')})` : ""}`;
+      text += `\n-# model: ${chat.label}${toolCount.size > 0 ? ` (${Array.from(toolCount, ([k, v]) => `${k}: ${v}`).join(', ')})` : ""}`;
       const finalMsgs = await sendMessage(text, m, first);
       sentMessageIds.push(...finalMsgs.map(msg => msg.id));
 
       // 今回のメッセージIDを保存
-      chat.lastIds = sentMessageIds;
+      entry.lastIds = sentMessageIds;
 
     } catch (e) {
       console.error(m.id, ': An error occurred during processing\n', e);
