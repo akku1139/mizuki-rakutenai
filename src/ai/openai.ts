@@ -31,7 +31,7 @@ export class OpenAICompatChat implements ChatSession {
     this.#config = config;
     // チャンネルごとにインスタンスが作られるので、IDはランダムで一意にする
     this.id = id ?? crypto.randomUUID();
-    this.label = `openai/${config.model}`;
+    this.label = config.model;
   }
 
   setSystemPrompt(text: string): void {
@@ -115,6 +115,7 @@ export class OpenAICompatChat implements ChatSession {
 
     let text = '';
     let reasoning = false;
+    const emittedTools = new Set<string>();
 
     for await (const raw of lines(res.body)) {
       const line = raw.trim();
@@ -131,6 +132,19 @@ export class OpenAICompatChat implements ChatSession {
 
       for (const choice of (chunk as any).choices ?? []) {
         const delta = choice.delta ?? {};
+        // ツール呼び出し (function calling)。フッター表示はRakutenAIと同様に tool-call-detail で流す
+        if (Array.isArray(delta.tool_calls)) {
+          for (const tc of delta.tool_calls) {
+            const name = tc?.function?.name;
+            if (typeof name === 'string' && name !== '' && !emittedTools.has(name)) {
+              emittedTools.add(name);
+              yield {
+                type: 'tool-call-detail',
+                data: { name, description: tc.function.description ?? '', groupId: this.id },
+              };
+            }
+          }
+        }
         if (delta.reasoning_content != null || delta.reasoning != null) {
           const t = delta.reasoning_content ?? delta.reasoning;
           if (!reasoning) {
