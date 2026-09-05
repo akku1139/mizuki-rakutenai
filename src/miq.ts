@@ -5,7 +5,7 @@ import process from 'node:process';
 import { OpenMiQ } from '@makeitaquote/openmiq';
 
 fluxer.on('messageCreate', async m => {
-  if (!m.author.bot) return;
+  if (m.author.bot) return;
   if (!(m.content === 'めいく' || m.content === 'make')) return;
   if (!m.reference?.messageId) return;
   m.channel.sendTyping();
