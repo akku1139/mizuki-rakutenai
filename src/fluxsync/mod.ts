@@ -64,7 +64,7 @@ const onDiscordMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<
   const whInfo = whMapDiscord[m.channelId];
   if (!whInfo || m.author.id === whInfo.whID) return;
   console.log('sending a message to fluxer:', m.id);
-  const targetInfo = whMapFluxer[whInfo.targetClannelID];
+  const targetInfo = whMapFluxer[whInfo.targetChannelID];
   const repliedId = dToF.get(m.reference?.messageId ?? '');
 
   const formData = new FormData();
@@ -75,7 +75,7 @@ const onDiscordMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<
     message_reference: repliedId === undefined ? undefined : { message_id: repliedId },
     username: `${m.member?.nickname ?? m.author.displayName}#Discord`,
     avatar_url: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
-    content: convertEmojis(m.content, guildOfChannel(fluxer, whInfo.targetClannelID)) + stickerLinks(m.stickers),
+    content: convertEmojis(m.content, guildOfChannel(fluxer, whInfo.targetChannelID)) + stickerLinks(m.stickers),
     embeds: m.embeds,
     attachments: Array.from(m.attachments.values()).map((a, i) => ({
       id: i,
@@ -117,20 +117,20 @@ const onFluxerMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<v
       const whSrc = await (m.channel as TextChannel).createWebhook({ name: 'Fluxer Sync' });
       const distCh = m.content.split(' ')[1];
       const whDist = await ((await discord.channels.fetch(distCh))! as TextChannel).createWebhook({ name: 'Fluxer Sync' });
-      whMapFluxer[m.channelId] = { whID: whSrc.id, whToken: whSrc.token, targetClannelID: distCh };
-      whMapDiscord[distCh] = { whID: whDist.id, whToken: whDist.token, targetClannelID: m.channelId };
+      whMapFluxer[m.channelId] = { whID: whSrc.id, whToken: whSrc.token, targetChannelID: distCh };
+      whMapDiscord[distCh] = { whID: whDist.id, whToken: whDist.token, targetChannelID: m.channelId };
       await saveWhMap();
       await m.reply(`link channel between https://discord.com/channels/1255359848644608035/${distCh} and https://fluxer.app/channels/1493971310876907609/${m.channelId}`);
     }
     return;
   }
   console.log('sending a message to discord:', m.id);
-  const targetInfo = whMapDiscord[whInfo.targetClannelID];
-  const targetGuild = guildOfChannel(discord, whInfo.targetClannelID);
+  const targetInfo = whMapDiscord[whInfo.targetChannelID];
+  const targetGuild = guildOfChannel(discord, whInfo.targetChannelID);
   const repliedId = fToD.get(m.reference?.messageId ?? '');
   // Discord webhooks cannot reply.
   const replyLine = repliedId === undefined || targetGuild === undefined ? ''
-    : `-# ↩ https://discord.com/channels/${targetGuild.id}/${whInfo.targetClannelID}/${repliedId}\n`;
+    : `-# ↩ https://discord.com/channels/${targetGuild.id}/${whInfo.targetChannelID}/${repliedId}\n`;
   const sent = await getDiscordWH(targetInfo).send({
     allowedMentions: {
       parse: [], // とりあえずメンション無し
@@ -153,7 +153,7 @@ const bridgeReactions = (from: Client, to: Client, idMap: Map<Snowflake, Snowfla
     const targetId = idMap.get(r.message.id);
     const wh = whMap[r.message.channelId];
     if (targetId === undefined || !wh) return;
-    const ch = await to.channels.fetch(wh.targetClannelID);
+    const ch = await to.channels.fetch(wh.targetChannelID);
     if (!ch?.isTextBased()) return;
     const msg = await ch.messages.fetch(targetId);
     const emoji = r.emoji.id === null ? r.emoji.name : msg.guild?.emojis.cache.find(e => e.name === r.emoji.name);

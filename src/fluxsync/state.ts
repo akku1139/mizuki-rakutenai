@@ -7,7 +7,7 @@ import fs from 'node:fs/promises';
 export interface WebhookLink {
   whID: string,
   whToken: string,
-  targetClannelID: string, // relation ※歴史的経緯によりタイポのまま。保存JSONのキーなので変更しない
+  targetChannelID: string, // relation ※歴史的経緯によりタイポのまま。保存JSONのキーなので変更しない
 }
 
 const readWhMap = async (path: string): Promise<Record<string, WebhookLink>> => {

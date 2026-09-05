@@ -138,7 +138,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
     && m.guild !== null
   ) {
     // セッションは「チャンネル x ユーザー」単位。Fluxer同期チャンネルはDiscord側のIDに正規化する。
-    const channelKey = whMapFluxer[m.channelId] ? whMapFluxer[m.channelId].targetClannelID : m.channelId;
+    const channelKey = whMapFluxer[m.channelId] ? whMapFluxer[m.channelId].targetChannelID : m.channelId;
     const contextKey = `${channelKey}:${m.author.id}`;
 
     if (m.content === `<@${DISCORD_USER_ID}> clear` || m.content === `<@${FLUXER_USER_ID}> clear`) {
