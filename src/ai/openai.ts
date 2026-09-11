@@ -125,6 +125,9 @@ export class OpenAICompatChat implements ChatSession {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.#config.apiKey}`,
+        "HTTP-Referer": "https://github.com/akku1139/mizuki-rakutenai",
+        "X-OpenRouter-Title": "mizuki-rakutenai",
+        "X-OpenRouter-Categories": "general-chat",
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(120_000),
