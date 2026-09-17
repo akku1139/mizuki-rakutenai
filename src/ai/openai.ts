@@ -5,6 +5,7 @@
 /// 結果を送り返すエージェントループを内部で回す。
 
 import type { AIEvent, ChatContents, ChatFile, ChatSession, ToolSpec } from './types.ts';
+import { fetchWithRateLimitRetry } from './ratelimit.ts';
 
 export interface OpenAICompatConfig {
   /** 例: https://api.openai.com/v1 (末尾に / を付けない) */
@@ -120,7 +121,7 @@ export class OpenAICompatChat implements ChatSession {
       body.tools = this.#tools.definitions;
     }
 
-    const res = await fetch(`${this.#config.baseUrl}/chat/completions`, {
+    const res = await fetchWithRateLimitRetry(() => fetch(`${this.#config.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -131,7 +132,7 @@ export class OpenAICompatChat implements ChatSession {
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(120_000),
-    });
+    }));
 
     if (!res.ok || !res.body) {
       const errBody = await res.text().catch(() => '');
