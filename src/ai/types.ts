@@ -74,6 +74,8 @@ export interface ChatSession {
   }): AsyncGenerator<AIEvent>,
   /** 履歴をクライアント側で持つバックエンド (OpenAI互換) のみ実装 */
   setSystemPrompt?(text: string): void,
+  /** ここまでの会話を引き継いだ別のセッションを作る。元のセッションはそのまま続けられる */
+  fork(): Promise<ChatSession>,
 }
 
 export const PROVIDERS = ['rakutenai', 'openai'] as const;

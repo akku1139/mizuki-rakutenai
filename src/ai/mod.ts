@@ -10,7 +10,7 @@ import {
   type OmitPartialGroupDMChannel,
   type Snowflake,
 } from 'discord.js';
-import { type Thread, User } from '@evex/rakutenai';
+import { Thread, User } from '@evex/rakutenai';
 import process from 'node:process';
 import { DISCORD_USER_ID, discord, FLUXER_USER_ID, fluxer } from '../clients.ts';
 import { whMapFluxer } from '../fluxsync/state.ts';
@@ -29,10 +29,20 @@ class RakutenAIChat implements ChatSession {
   readonly label = 'rakutenai';
   readonly id: string;
   readonly t: Thread;
+  readonly #user: User;
+  /** このスレッドのメッセージID (fork するときに共有する範囲) */
+  readonly #messageIds = new Set<string>();
 
-  constructor(t: Thread) {
+  constructor(t: Thread, user: User) {
     this.t = t;
     this.id = t.id;
+    this.#user = user;
+  }
+
+  /** 会話を共有リンクにして、そこから新しいスレッドを作る */
+  async fork(): Promise<RakutenAIChat> {
+    const { shareId } = await this.t.createShare([...this.#messageIds]);
+    return new RakutenAIChat(await Thread.fromShared(shareId, this.#user), this.#user);
   }
 
   uploadFile(opts: { file: File, isImage?: boolean }) {
@@ -43,10 +53,13 @@ class RakutenAIChat implements ChatSession {
     mode?: 'USER_INPUT' | 'DEEP_THINK' | 'AI_READ',
     contents: ChatContents,
   }): AsyncGenerator<AIEvent> {
-    yield* this.t.sendMessage({
+    for await (const e of this.t.sendMessage({
       mode: message.mode ?? 'USER_INPUT',
       contents: message.contents,
-    } as never);
+    } as never)) {
+      if (e.type === 'done') for (const id of e.messageIds) this.#messageIds.add(id);
+      yield e;
+    }
   }
 }
 
@@ -113,7 +126,8 @@ export const createChatSession = async (
     }
     return chat;
   }
-  return new RakutenAIChat(await (await User.create()).createThread());
+  const user = await User.create();
+  return new RakutenAIChat(await user.createThread(), user);
 };
 
 /** 新規エントリを作成する。RakutenAIの場合はシステムプロンプトを返す */
@@ -160,8 +174,14 @@ const sendParts = async (text: string, m: OmitPartialGroupDMChannel<Message>, fi
 /**
  * 返信を送る。MAX_LINES 行を超える分は、最初のメッセージから作ったスレッドに送る。
  * 末尾の `-# ` の行 (モデル名など) だけがはみ出すときはスレッドを作らない。
+ * 作ったスレッドは `threads` に追加する。
  */
-const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message[]> => {
+const sendMessage = async (
+  text: string,
+  m: OmitPartialGroupDMChannel<Message>,
+  first: boolean,
+  threads: ThreadChannel[] = [],
+): Promise<Message[]> => {
   const normalized = text
     .replace(/^####+ /gm, '### ')
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, "[$1](<$2>)");
@@ -187,6 +207,7 @@ const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, 
     console.error('failed to start a thread:', e);
     return [...sentMessages, ...await sendParts(tail, m, false)];
   }
+  threads.push(thread);
   await main.edit(`${main.content}\n続き: ${thread.url}`);
 
   for(const part of splitLongString(tail, 1500)) {
@@ -329,6 +350,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       let first = true;
       let last: Message | undefined;
       const sentMessageIds: Snowflake[] = [];
+      const threads: ThreadChannel[] = [];
 
       for await (const gen of res) {
         if (++c % 7 === 0)
@@ -353,7 +375,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
             m.channel.sendTyping();
 
             if (!isEffectivelyEmpty(text)) {
-              const msgs = await sendMessage(text, m, first);
+              const msgs = await sendMessage(text, m, first, threads);
               sentMessageIds.push(...msgs.map(msg => msg.id));
               text = '';
               first = false;
@@ -361,7 +383,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
             if (last) await last.edit({ content: gen.url });
             else {
-              const msgs = await sendMessage(gen.url, m, first);
+              const msgs = await sendMessage(gen.url, m, first, threads);
               last = msgs[0];
               sentMessageIds.push(...msgs.map(msg => msg.id));
             }
@@ -409,11 +431,28 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       text = text.trim();
       text += `\n-# model: ${chat.label}${toolCount.size > 0 ? ` (${Array.from(toolCount, ([k, v]) => `${k}: ${v}`).join(', ')})` : ""}`;
-      const finalMsgs = await sendMessage(text, m, first);
+      const finalMsgs = await sendMessage(text, m, first, threads);
       sentMessageIds.push(...finalMsgs.map(msg => msg.id));
 
       // 今回のメッセージIDを保存
       entry.lastIds = sentMessageIds;
+
+      // 続きを送ったスレッドでも同じ会話を続けられるよう、会話を複製して登録する
+      // (エラーで会話が破棄されたときは引き継がない)
+      if (chatStore.get(contextKey) === entry) {
+        for (const thread of threads) {
+          try {
+            chatStore.set(`${thread.id}:${m.author.id}`, {
+              t: await chat.fork(),
+              q: Promise.resolve(),
+              lastIds: [...sentMessageIds],
+              provider: entry.provider,
+            });
+          } catch (e) {
+            console.error(m.id, ': failed to fork the chat for a thread\n', e);
+          }
+        }
+      }
 
     } catch (e) {
       console.error(m.id, ': An error occurred during processing\n', e);

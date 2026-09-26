@@ -193,3 +193,23 @@ test('a model that keeps calling tools is stopped after the round limit', async 
   assert.equal(requests.length, 11);
   assert.deepEqual(events.at(-1), { type: 'error', code: 'loop', message: 'ツールの実行回数上限を超えました', trace: { id: '-', url: '-' }, threadId: chat.id });
 });
+
+test('fork copies the system prompt and history, and the two chats continue separately', async t => {
+  const requests = mockFetch(t, () => stream(delta({ content: 'reply' }), done));
+  const chat = new OpenAICompatChat(config);
+  chat.setSystemPrompt('be nice');
+  await say(chat, 'one');
+
+  const forked = await chat.fork();
+  assert.notEqual(forked.id, chat.id);
+  await say(forked, 'in thread');
+  await say(chat, 'in channel');
+
+  const base = [
+    { role: 'system', content: 'be nice' },
+    { role: 'user', content: 'one' },
+    { role: 'assistant', content: 'reply' },
+  ];
+  assert.deepEqual(requests[1]!.body.messages, [...base, { role: 'user', content: 'in thread' }]);
+  assert.deepEqual(requests[2]!.body.messages, [...base, { role: 'user', content: 'in channel' }]);
+});

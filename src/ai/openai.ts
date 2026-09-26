@@ -73,6 +73,13 @@ export class OpenAICompatChat implements ChatSession {
     this.#systemPrompt += `\nあなたが参加してるサーバーは "${guildName}"、チャンネルは "${channelName}" です。`;
   }
 
+  async fork(): Promise<OpenAICompatChat> {
+    const chat = new OpenAICompatChat(this.#config, this.#tools);
+    chat.#systemPrompt = this.#systemPrompt;
+    chat.#history = structuredClone(this.#history);
+    return chat;
+  }
+
   async uploadFile(opts: { file: File, isImage?: boolean }): Promise<ChatFile> {
     const buf = Buffer.from(await opts.file.arrayBuffer());
     const mime = opts.file.type || 'application/octet-stream';
