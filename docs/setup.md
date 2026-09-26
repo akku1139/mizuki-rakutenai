@@ -57,7 +57,7 @@ OpenRouter など OpenAI 互換のサービスは `OPENAI_BASE_URL` を差し替
 ## 起動
 
 ```sh
-node --env-file=.env index.ts
+pnpm start   # node --env-file=.env index.ts
 ```
 
 本番運用では `start.sh` を使います。

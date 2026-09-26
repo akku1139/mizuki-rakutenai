@@ -52,11 +52,18 @@ start.sh            本番用の起動ループ
 ## テストと型チェック
 
 ```sh
-node --test tests/ratelimit.test.ts
-pnpm exec tsc --noEmit
+pnpm test        # node --test "tests/*.test.ts"
+pnpm typecheck   # tsc --noEmit
 ```
 
-現在のテストは `tests/ratelimit.test.ts` だけで、429 の再試行、OpenAI 互換 API の添付ファイル処理、ツール呼び出し ID の対応を確認しています。
+テストは OpenAI 互換 API のアダプタを対象にしています。
+
+| ファイル | 内容 |
+|---|---|
+| `tests/ratelimit.test.ts` | 429 の再試行、添付ファイル処理、ツール呼び出し ID の対応 |
+| `tests/openai-history.test.ts` | 会話履歴の切り詰めと、失敗・空応答時の巻き戻し |
+
+GitHub Actions (`.github/workflows/ci.yml`) で、main への push と PR のたびに両方を実行します。
 
 ## コーディング規約
 

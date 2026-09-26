@@ -22,7 +22,7 @@ Evex の Discord サーバーと Fluxer サーバーで動いているボット�
 ```sh
 pnpm install
 cp .env.example .env   # トークンなどを記入する
-node --env-file=.env index.ts
+pnpm start   # node --env-file=.env index.ts
 ```
 
 本番では `start.sh` を使います。`git pull` してから起動し、プロセスが終了したら10秒後に
