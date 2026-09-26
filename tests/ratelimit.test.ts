@@ -97,3 +97,34 @@ test('429 during tool follow-up retries the same request without executing the t
   assert.equal(events.filter(e => e.type === 'tool-call-detail').length, 1);
   assert.ok(events.some(e => e.type === 'text-delta' && e.text === 'finished'));
 });
+
+test('OpenAI chat includes image and text attachments in the request', async t => {
+  let requestBody: { messages: Array<{ role: string, content: unknown }> } | undefined;
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
+    requestBody = JSON.parse(String(init.body)) as typeof requestBody;
+    return new Response('data: {"choices":[{"delta":{"content":"read"}}]}\n\ndata: [DONE]\n\n');
+  });
+
+  const chat = new OpenAICompatChat({ baseUrl: 'https://unused.invalid/v1', apiKey: 'test', model: 'test' });
+  let eventCount = 0;
+  for await (const _event of chat.sendMessage({ contents: [
+    { type: 'text', text: 'Please inspect these attachments.' },
+    { type: 'file', file: {
+      fileId: 'image', fileUrl: 'data:image/png;base64,aW1hZ2U=', fileName: 'photo.png', isImage: true,
+    } },
+    { type: 'file', file: {
+      fileId: 'text', fileUrl: 'data:text/plain;base64,aGVsbG8=', fileName: 'notes.txt', isImage: false,
+    } },
+    { type: 'file', file: {
+      fileId: 'pdf', fileUrl: 'data:application/pdf;base64,cGRm', fileName: 'report.pdf', isImage: false,
+    } },
+  ] })) eventCount++;
+
+  assert.equal(eventCount, 2);
+  assert.deepEqual(requestBody?.messages.at(-1)?.content, [
+    { type: 'text', text: 'Please inspect these attachments.' },
+    { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2U=' } },
+    { type: 'text', text: '[添付ファイル: notes.txt]\nhello' },
+    { type: 'text', text: '[添付ファイル「report.pdf」は、このAPI経路では読み取れない形式です]' },
+  ]);
+});
