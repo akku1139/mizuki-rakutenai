@@ -110,21 +110,60 @@ const chatStore = new Map<string, ChatEntry>();
 let aiWaitingJobs = 0;
 let aiProcessingJobs = 0;
 
-const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message[]> => {
-  const parts = splitLongString(text
-    .replace(/^####+ /gm, '### ')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, "[$1](<$2>)")
-  , 1500);
+/** これより長い返信は、続きをスレッドに投稿する */
+const MAX_LINES = 5;
 
+/** 1500文字ごとに分けて送る。`first` なら最初の1件だけリプライにする */
+const sendParts = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message[]> => {
   const sentMessages: Message[] = [];
 
-  for(const part of parts) {
+  for(const part of splitLongString(text, 1500)) {
     if(first) {
       sentMessages.push(await m.reply(part));
       first = false;
     } else {
       sentMessages.push(await m.channel.send(part));
     }
+  }
+
+  return sentMessages;
+};
+
+/**
+ * 返信を送る。MAX_LINES 行を超える分は、最初のメッセージから作ったスレッドに送る。
+ * 末尾の `-# ` の行 (モデル名など) だけがはみ出すときはスレッドを作らない。
+ */
+const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message[]> => {
+  const normalized = text
+    .replace(/^####+ /gm, '### ')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, "[$1](<$2>)");
+
+  const lines = normalized.split('\n');
+  const head = lines.slice(0, MAX_LINES).join('\n');
+  const tail = lines.slice(MAX_LINES).join('\n');
+
+  // スレッドの中ではスレッドを作れないので、そのまま送る
+  if(m.channel.isThread() || lines.slice(MAX_LINES).every(l => isEffectivelyEmpty(l) || l.startsWith('-# '))) {
+    return sendParts(normalized, m, first);
+  }
+
+  const sentMessages = await sendParts(head, m, first);
+  const main = sentMessages[0]!;
+
+  let thread;
+  try {
+    const threadName = (lines.find(l => !isEffectivelyEmpty(l)) ?? '続き').slice(0, 80);
+    thread = await main.startThread({ name: threadName });
+  } catch (e) {
+    // Fluxer や権限が無いチャンネルではスレッドを作れないので、続きもそのまま送る
+    console.error('failed to start a thread:', e);
+    return [...sentMessages, ...await sendParts(tail, m, false)];
+  }
+  await main.edit(`${main.content}\n続き: ${thread.url}`);
+
+  for(const part of splitLongString(tail, 1500)) {
+    if(isEffectivelyEmpty(part)) continue;
+    sentMessages.push(await thread.send(part));
   }
 
   return sentMessages;
