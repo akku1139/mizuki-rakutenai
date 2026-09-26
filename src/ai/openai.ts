@@ -17,7 +17,7 @@ export interface OpenAICompatConfig {
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool',
-  content: string | null,
+  content: string | null | OpenAIContentPart[],
   tool_calls?: Array<{
     id: string,
     type: 'function',
@@ -26,8 +26,24 @@ interface ChatMessage {
   tool_call_id?: string,
 }
 
+type OpenAIContentPart =
+  | { type: 'text', text: string }
+  | { type: 'image_url', image_url: { url: string } };
+
 const MAX_HISTORY = 40; // 保持するやり取りの上限 (system除く)
 const MAX_TOOL_ROUNDS = 10; // 1回の発言でツールを実行して再生成する上限
+const MAX_TEXT_ATTACHMENT_CHARS = 20_000;
+
+const textFromFile = (file: ChatFile): string | undefined => {
+  const dataUrl = /^data:([^;,]+);base64,(.*)$/s.exec(file.fileUrl);
+  if (!dataUrl || !/^text\/|^application\/(?:json|xml|x-yaml|yaml|csv)$/i.test(
+    dataUrl[1]!,
+  )) return undefined;
+  const text = Buffer.from(dataUrl[2]!, 'base64').toString('utf8');
+  return text.length > MAX_TEXT_ATTACHMENT_CHARS
+    ? `${text.slice(0, MAX_TEXT_ATTACHMENT_CHARS)}\n[添付ファイルの残りは省略されました]`
+    : text;
+};
 
 export class OpenAICompatChat implements ChatSession {
   readonly label: string;
@@ -77,12 +93,33 @@ export class OpenAICompatChat implements ChatSession {
       .map(c => c.text)
       .join('\n');
 
-    yield* this.#agentLoop(userText, message.meta);
+    const files = message.contents
+      .filter((c): c is { type: 'file', file: ChatFile } => c.type === 'file')
+      .map(c => c.file);
+    const userContent: ChatMessage['content'] = files.length === 0
+      ? userText
+      : [
+          ...(userText ? [{ type: 'text' as const, text: userText }] : []),
+          ...files.map((file): OpenAIContentPart => {
+            if (file.isImage) {
+              return { type: 'image_url', image_url: { url: file.fileUrl } };
+            }
+            const text = textFromFile(file);
+            return {
+              type: 'text',
+              text: text === undefined
+                ? `[添付ファイル「${file.fileName}」は、このAPI経路では読み取れない形式です]`
+                : `[添付ファイル: ${file.fileName}]\n${text}`,
+            };
+          }),
+        ];
+
+    yield* this.#agentLoop(userContent, message.meta);
   }
 
   /** ツール実行 → 再生成のループ */
-  async *#agentLoop(userText: string, meta: unknown): AsyncGenerator<AIEvent> {
-    this.#history.push({ role: 'user', content: userText });
+  async *#agentLoop(userContent: ChatMessage['content'], meta: unknown): AsyncGenerator<AIEvent> {
+    this.#history.push({ role: 'user', content: userContent });
     if (this.#history.length > MAX_HISTORY * 2) {
       this.#history = this.#history.slice(-MAX_HISTORY * 2);
     }
