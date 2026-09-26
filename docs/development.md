@@ -56,7 +56,7 @@ node --test tests/ratelimit.test.ts
 pnpm exec tsc --noEmit
 ```
 
-現在のテストは `tests/ratelimit.test.ts` だけで、429 の再試行と OpenAI 互換 API の添付ファイル処理を確認しています。
+現在のテストは `tests/ratelimit.test.ts` だけで、429 の再試行、OpenAI 互換 API の添付ファイル処理、ツール呼び出し ID の対応を確認しています。
 
 ## コーディング規約
 

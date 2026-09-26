@@ -128,3 +128,23 @@ test('OpenAI chat includes image and text attachments in the request', async t =
     { type: 'text', text: '[添付ファイル「report.pdf」は、このAPI経路では読み取れない形式です]' },
   ]);
 });
+
+test('a tool call without an id gets the same generated id on both sides of the history', async t => {
+  const bodies: Array<{ messages: Array<{ role: string, tool_calls?: Array<{ id: string }>, tool_call_id?: string }> }> = [];
+  const sse = (delta: object) => new Response(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`);
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
+    bodies.push(JSON.parse(String(init.body)));
+    return bodies.length === 1
+      ? sse({ tool_calls: [{ index: 0, function: { name: 'lookup', arguments: '{}' } }] })
+      : sse({ content: 'finished' });
+  });
+  const chat = new OpenAICompatChat({ baseUrl: 'https://unused.invalid/v1', apiKey: 'test', model: 'test' }, {
+    definitions: [{ type: 'function', function: { name: 'lookup' } }],
+    execute: async () => [true, { result: 'found' }],
+  });
+  for await (const _event of chat.sendMessage({ contents: [{ type: 'text', text: 'hello' }] })) { /* drain */ }
+  const followUp = bodies[1]!.messages;
+  const callId = followUp.find(m => m.role === 'assistant')?.tool_calls?.[0]?.id;
+  assert.ok(callId);
+  assert.equal(followUp.find(m => m.role === 'tool')?.tool_call_id, callId);
+});

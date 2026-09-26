@@ -230,7 +230,9 @@ export class OpenAICompatChat implements ChatSession {
       }
     }
 
-    const calls = [...toolCalls.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
+    // IDが無いツール呼び出しには、assistant側とtool側で同じIDを振る
+    const calls = [...toolCalls.entries()].sort((a, b) => a[0] - b[0])
+      .map(([, v]) => ({ ...v, id: v.id || `call_${crypto.randomUUID()}` }));
 
     if (calls.length > 0) {
       // アシスタントのツール呼び出しを履歴に積む
@@ -238,7 +240,7 @@ export class OpenAICompatChat implements ChatSession {
         role: 'assistant',
         content: text || null,
         tool_calls: calls.map(c => ({
-          id: c.id || `call_${crypto.randomUUID()}`,
+          id: c.id,
           type: 'function' as const,
           function: { name: c.name, arguments: c.arguments || '{}' },
         })),
@@ -270,8 +272,8 @@ export class OpenAICompatChat implements ChatSession {
 
         this.#history.push({
           role: 'tool',
-          content: JSON.stringify(result[0] ? result[1] : result[1]),
-          tool_call_id: c.id || `call_${crypto.randomUUID()}`,
+          content: JSON.stringify(result[1]),
+          tool_call_id: c.id,
         });
       }
       return; // ツール実行後は agentLoop が再生成する

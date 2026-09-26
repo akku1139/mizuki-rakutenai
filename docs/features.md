@@ -17,6 +17,7 @@ Evex の Discord サーバーと Fluxer サーバーで起きた次のイベン�
 - フッターは `Evex Developers` / `Evex Developers@Fluxer.app` です
 - 本文が変わっていない編集 (埋め込みの展開など) と、ログ用 webhook 自身の投稿の編集は記録しません
 - キャッシュに無いメッセージが削除された場合、投稿者や本文は取得できません
+- Discord の embed の文字数制限を超えないよう、長い本文は末尾を `…` で切り詰めます
 - webhook の設定は環境変数 `DISCORD_LOG_WEBHOOK`、`FLUXER_LOG_WEBHOOK_ID`、`FLUXER_LOG_WEBHOOK_TOKEN` で行います
 
 ## 安価
@@ -45,7 +46,7 @@ MEXC の WebSocket (`wss://wbs-api.mexc.com/ws`) で 114514USDT の約定スト�
 - 取引回数
 
 - 30秒の間に約定が無かった場合は投稿しません
-- 出来高は約定数量の合計です (表示の単位は USDT になっています)
+- 出来高は約定数量の合計で、単位は基軸通貨 (114514USDT なら 114514) です
 - MEXC のメッセージは protobuf 形式で、`mexc-proto/` の生成コード (Apache-2.0) でデコードします
 - `MexcWebsocketClient` は ping による接続維持と、切断時の再接続を行います
 
@@ -60,3 +61,4 @@ MEXC の WebSocket (`wss://wbs-api.mexc.com/ws`) で 114514USDT の約定スト�
 - API キーは環境変数 `OPENMIQ_TOKEN` で設定します
 - 画像はカラーで作ります
 - ボットが送った `めいく` / `make` には反応しません
+- 画像の作成に失敗した場合は、エラー内容を返信します

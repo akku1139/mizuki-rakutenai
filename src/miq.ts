@@ -8,12 +8,17 @@ fluxer.on('messageCreate', async m => {
   if (m.author.bot) return;
   if (!(m.content === 'めいく' || m.content === 'make')) return;
   if (!m.reference?.messageId) return;
-  m.channel.sendTyping();
-  const replied = await m.channel.messages.fetch(m.reference.messageId);
-  const miq = new OpenMiQ({
-    apiKey: process.env['OPENMIQ_TOKEN']!,
-    baseUrl: 'https://miq.otnc.dev',
-  }).setFromMessage(replied).setColor(true);
-  const response = await miq.toURL();
-  await m.reply(response);
+  try {
+    m.channel.sendTyping().catch(() => {});
+    const replied = await m.channel.messages.fetch(m.reference.messageId);
+    const miq = new OpenMiQ({
+      apiKey: process.env['OPENMIQ_TOKEN']!,
+      baseUrl: 'https://miq.otnc.dev',
+    }).setFromMessage(replied).setColor(true);
+    const response = await miq.toURL();
+    await m.reply(response);
+  } catch (e) {
+    console.error(m.id, ': miq failed\n', e);
+    await m.reply(`ERROR:\n\`\`\`\n${e}\n\`\`\``).catch(() => {});
+  }
 });

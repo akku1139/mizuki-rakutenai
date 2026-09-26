@@ -33,6 +33,13 @@ const COLORS = {
   leave: 0xd3c821,
 } as const;
 
+/** Discord rejects the whole embed when a field exceeds its limit. */
+const truncate = (text: string, max: number): string =>
+  text.length <= max ? text : text.slice(0, max - 1) + '…';
+
+/** A field value (max 1024) wrapped in a code block. */
+const codeField = (text: string | null): string => '```md\n' + truncate(text ?? '', 1024 - 10) + '\n```';
+
 export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig): void => {
   const sendLog = async (embed: Record<string, unknown>): Promise<void> => {
     await webhook.send({ embeds: [embed] });
@@ -41,7 +48,7 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
   client.on('messageDelete', async m => {
     if (m.guildId !== guildId) return;
     await sendLog({
-      description: `:wastebasket: **Message sent by <@${m.author?.id}> deleted in <#${m.channelId}>.**\n${m.content}`,
+      description: `:wastebasket: **Message sent by <@${m.author?.id}> deleted in <#${m.channelId}>.**\n${truncate(m.content ?? '', 3900)}`,
       footer: {
         text: footerText,
       },
@@ -70,12 +77,12 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
       fields: [
         {
           name: "**Old**",
-          value: '```md\n'+o.content+'\n```',
+          value: codeField(o.content),
           inline: false,
         },
         {
           name: "**New**",
-          value: '```md\n'+n.content+'\n```',
+          value: codeField(n.content),
           inline: false,
         }
       ],
