@@ -133,7 +133,7 @@ const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, 
 const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
   if (
     !m.author.bot
-    && (m.mentions.users.has(discord.user!.id) || m.mentions.users.has(fluxer.user!.id))
+    && (m.mentions.users.has(DISCORD_USER_ID) || m.mentions.users.has(FLUXER_USER_ID))
     && (m.channel instanceof TextChannel || m.channel instanceof ThreadChannel)
     && m.guild !== null
   ) {

@@ -38,13 +38,15 @@ export const isEffectivelyEmpty = (text: string): boolean => {
 export const createFileFromUrl = async (url: string, fileName: string): Promise<File> => {
   // 1. URLからデータを取得
   const response = await fetch(url);
+  if (!response.ok) throw new Error(`failed to fetch ${fileName}: ${response.status} ${response.statusText}`);
 
   // 2. ResponseをBlob（バイナリデータ）に変換
   const data = await response.blob();
 
   // 3. Blobのメタデータを元にFileオブジェクトを作成
   // 第二引数にはファイル名、第三引数にはMIMEタイプ（任意）を指定
-  const metadata = { type: data.type ?? 'text/plain' };
+  // Blob.typeは不明なとき空文字列になるので ?? ではなく || で補う
+  const metadata = { type: data.type || 'text/plain' };
   return new File([data], fileName, metadata);
 };
 

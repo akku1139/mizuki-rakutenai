@@ -113,10 +113,16 @@ const onDiscordMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<
 const onFluxerMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<void> => {
   const whInfo = whMapFluxer[m.channelId];
   if (!whInfo || m.author.id === whInfo.whID) {
-    if (m.author.id === '1493964990916384451' && m.content.startsWith('=syncsetup ')) {
+    if (m.author.id === '1493964990916384451' && (m.content === '=syncsetup' || m.content.startsWith('=syncsetup '))) {
+      const distCh = m.content.split(' ')[1] ?? '';
+      // webhookを作る前に同期先を確かめ、失敗時に片側だけwebhookが残らないようにする
+      const dist = /^\d+$/.test(distCh) ? await discord.channels.fetch(distCh).catch(() => null) : null;
+      if (dist === null || !dist.isTextBased() || !('createWebhook' in dist)) {
+        await m.reply('usage: `=syncsetup <Discord text channel ID>`');
+        return;
+      }
       const whSrc = await (m.channel as TextChannel).createWebhook({ name: 'Fluxer Sync' });
-      const distCh = m.content.split(' ')[1];
-      const whDist = await ((await discord.channels.fetch(distCh))! as TextChannel).createWebhook({ name: 'Fluxer Sync' });
+      const whDist = await (dist as TextChannel).createWebhook({ name: 'Fluxer Sync' });
       whMapFluxer[m.channelId] = { whID: whSrc.id, whToken: whSrc.token, targetChannelID: distCh };
       whMapDiscord[distCh] = { whID: whDist.id, whToken: whDist.token, targetChannelID: m.channelId };
       await saveWhMap();

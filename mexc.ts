@@ -125,6 +125,10 @@ export class MexcWebsocketClient {
   disconnect(): void {
     this.#subscriptions.clear();
     this.#stopHeartbeat();
+    if (this.#reconnectTimeout) {
+      clearTimeout(this.#reconnectTimeout);
+      this.#reconnectTimeout = null;
+    }
     if (this.#ws) {
       this.#ws.onclose = null; // 再接続ロジックを回避
       this.#ws.close();
