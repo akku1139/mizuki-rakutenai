@@ -13,8 +13,9 @@ import { type Thread, User } from '@evex/rakutenai';
 import process from 'node:process';
 import { DISCORD_USER_ID, discord, FLUXER_USER_ID, fluxer } from '../clients.ts';
 import { whMapFluxer } from '../fluxsync/state.ts';
-import { createFileFromUrl, isEffectivelyEmpty, splitLongString } from '../utils.ts';
+import { createFileFromUrl, getFileName, isEffectivelyEmpty, splitLongString } from '../utils.ts';
 import { buildContextBlock } from './context.ts';
+import { embedImageUrls } from './embeds.ts';
 import { OpenAICompatChat } from './openai.ts';
 import { getUserProvider, loadPrefs, setUserProvider } from './prefs.ts';
 import { buildSystemPrompt } from './prompt.ts';
@@ -215,11 +216,28 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       const contextBlock = buildContextBlock(m, sorted, entry.lastIds, rep.length);
 
-      const files = await Promise.all(m.attachments.map(async f => {
+      // 転送されたメッセージの添付と embed は messageSnapshots 側にある
+      const snapshots = [...m.messageSnapshots.values()];
+      const attachments = [m, ...snapshots].flatMap(s => [...s.attachments.values()]);
+      const attachmentFiles = await Promise.all(attachments.map(async f => {
         console.log('file:', f.url, f.name);
         const file = await createFileFromUrl(f.proxyURL, f.name);
         return chat.uploadFile({ file, isImage: file.type.startsWith('image/') })
       }));
+
+      // embed の画像 (リンクのプレビューなど)。取れなかった画像は飛ばす
+      const embedImages = await Promise.all(embedImageUrls([m, ...snapshots].flatMap(s => s.embeds)).map(async url => {
+        try {
+          console.log('embed image:', url);
+          const file = await createFileFromUrl(url, getFileName(url) || 'image');
+          if (!file.type.startsWith('image/')) return undefined;
+          return await chat.uploadFile({ file, isImage: true });
+        } catch (e) {
+          console.error('failed to load an embed image:', url, e);
+          return undefined;
+        }
+      }));
+      const files = [...attachmentFiles, ...embedImages.filter(f => f !== undefined)];
 
       const input = rep + contextBlock;
 

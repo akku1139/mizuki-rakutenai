@@ -3,6 +3,7 @@
 /// Formats recent channel messages into the text context given to the model.
 
 import type { Message, OmitPartialGroupDMChannel, Snowflake } from 'discord.js';
+import { describeMessage } from './embeds.ts';
 
 /** Upper bound of the context block, excluding the system prompt prefix. */
 const MAX_CONTEXT_LEN = 7000;
@@ -15,15 +16,15 @@ const formatTime = (m: Message): string =>
 /** One history line; author info is omitted for consecutive posts by the same user. */
 const formatLine = (m: Message, lastAuthorId: string | null): string => {
   const replyNote = m.reference ? `(reply to ${m.reference.messageId}) ` : '';
-  const forwardNote = m.messageSnapshots && m.messageSnapshots.size > 0 ? ' (forwarded)' : '';
+  const body = describeMessage(m);
   const botPrefix = m.author.bot ? '[BOT] ' : '';
 
   if (m.author.id === lastAuthorId) {
     // 連続投稿: ユーザー情報を省略し、ID・返信マーク・時刻・本文のみ
-    return `[${m.id}] ${replyNote}${formatTime(m)} ${m.content}${forwardNote}`;
+    return `[${m.id}] ${replyNote}${formatTime(m)} ${body}`;
   }
   // 通常表示
-  return `[${m.id}] ${replyNote}${formatTime(m)} | ${botPrefix}${m.member?.displayName ?? m.author.displayName} (${m.author.username}, ${m.author.id}): ${m.content}${forwardNote}`;
+  return `[${m.id}] ${replyNote}${formatTime(m)} | ${botPrefix}${m.member?.displayName ?? m.author.displayName} (${m.author.username}, ${m.author.id}): ${body}`;
 };
 
 /**
