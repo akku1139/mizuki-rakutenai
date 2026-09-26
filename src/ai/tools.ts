@@ -12,6 +12,7 @@ import {
 } from 'discord.js';
 import process from 'node:process';
 import { discord, fluxer } from '../clients.ts';
+import { describeEmbed, describeMessage } from './embeds.ts';
 import type { ToolSpec } from './types.ts';
 
 /** ツールの実行結果。成功値はそのままモデルへJSONとして渡される */
@@ -57,6 +58,11 @@ const parseMessageUrl = (url: string): { guildId?: string, channelId: string, me
 /** メッセージをAIに渡す形へ整形 */
 const messageToAISchema = async (m: Message<boolean>): Promise<Record<string, unknown>> => ({
   content: m.content,
+  embeds: m.embeds.length > 0 ? m.embeds.map(e => describeEmbed(e.data)).filter(e => e !== undefined) : undefined,
+  attachments: m.attachments.size > 0
+    ? [...m.attachments.values()].map(a => ({ name: a.name, url: a.url, contentType: a.contentType ?? undefined }))
+    : undefined,
+  forwarded: m.messageSnapshots.size > 0 ? [...m.messageSnapshots.values()].map(s => describeMessage(s)) : undefined,
   url: m.url,
   timestamp: m.createdAt.toISOString(),
   author: {
