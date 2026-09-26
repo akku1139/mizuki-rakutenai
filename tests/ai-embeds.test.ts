@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { APIEmbed } from 'discord.js';
+import type { APIEmbed, Message, OmitPartialGroupDMChannel } from 'discord.js';
+import { buildContextBlock } from '../src/ai/context.ts';
 import { describeEmbed, describeMessage, embedImageUrls } from '../src/ai/embeds.ts';
 
 const msg = (content: string, embeds: object[] = [], names: string[] = []) => ({
@@ -56,5 +57,31 @@ test('embed images use the proxy URL, take media thumbnails, skip article thumbn
   ] as APIEmbed[];
   assert.deepEqual(embedImageUrls(embeds.map(data => ({ data }))), [
     'https://proxy/1.png', 'https://a/2.png', 'https://a/3.png', 'https://a/4.png',
+  ]);
+});
+
+const fakeMessage = (id: string, authorId: string, content: string, embeds: object[] = []) => ({
+  id,
+  content,
+  createdAt: new Date(0),
+  reference: null,
+  messageSnapshots: new Map(),
+  embeds: embeds.map(data => ({ data })),
+  attachments: new Map(),
+  member: null,
+  author: { id: authorId, bot: false, displayName: authorId, username: authorId },
+}) as unknown as Message;
+
+test('replied-to messages come first with their embeds, even when older than the recent history', () => {
+  const replied = fakeMessage('1', 'alice', 'see this', [{ type: 'article', title: 'News', image: { url: 'https://a/og.png' } }]);
+  const recent = fakeMessage('5', 'bob', 'hi');
+  const trigger = fakeMessage('9', 'carol', 'what is it?') as OmitPartialGroupDMChannel<Message>;
+  const lines = buildContextBlock(trigger, [recent], [], 0, [replied, recent]).trimEnd().split('\n');
+  assert.deepEqual(lines.map(l => l.replace(/\d\d:\d\d:\d\d/, 'T')), [
+    '[System] 返信先のメッセージ:',
+    '[1] T | alice (alice, alice): see this [embed: News / (画像)]',
+    '[System] ここから直近のメッセージ:',
+    '[5] T | bob (bob, bob): hi',
+    '[9] T | carol (carol, carol): what is it?',
   ]);
 });

@@ -4,6 +4,7 @@
 
 import {
   type Message,
+  MessageReferenceType,
   TextChannel,
   ThreadChannel,
   type OmitPartialGroupDMChannel,
@@ -48,6 +49,32 @@ class RakutenAIChat implements ChatSession {
     } as never);
   }
 }
+
+/** The message and the messages forwarded in it, whose attachments and embeds live in the snapshots. */
+const withSnapshots = (m: Message<boolean>) => [m, ...m.messageSnapshots.values()];
+
+/**
+ * The replied-to message and the posts by the same author around it,
+ * which often carry the images or links the question is about.
+ * Replies to our own messages are skipped; the conversation already has them.
+ */
+const fetchRepliedMessages = async (m: OmitPartialGroupDMChannel<Message<boolean>>): Promise<Message<boolean>[]> => {
+  // 転送も reference を持つが、中身は messageSnapshots にある
+  if (!m.reference || m.reference.type === MessageReferenceType.Forward || m.reference.channelId !== m.channelId) return [];
+  const refId = m.reference.messageId;
+  if (!refId) return [];
+  try {
+    const ref = await m.channel.messages.fetch(refId);
+    if (ref.author.id === DISCORD_USER_ID || ref.author.id === FLUXER_USER_ID) return [];
+    const around = await m.channel.messages.fetch({ around: refId, limit: 10 });
+    return [...around.values()]
+      .filter(msg => msg.author.id === ref.author.id && msg.id !== m.id)
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+  } catch (e) {
+    console.error('failed to fetch the replied message:', e);
+    return [];
+  }
+};
 
 interface ChatEntry {
   t: ChatSession,
@@ -214,30 +241,35 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         .filter(msg => !lastBotMsgId || BigInt(msg.id) > BigInt(lastBotMsgId))
         .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
-      const contextBlock = buildContextBlock(m, sorted, entry.lastIds, rep.length);
+      const replied = await fetchRepliedMessages(m);
+      const contextBlock = buildContextBlock(m, sorted, entry.lastIds, rep.length, replied);
 
-      // 転送されたメッセージの添付と embed は messageSnapshots 側にある
-      const snapshots = [...m.messageSnapshots.values()];
-      const attachments = [m, ...snapshots].flatMap(s => [...s.attachments.values()]);
-      const attachmentFiles = await Promise.all(attachments.map(async f => {
+      const attachmentFiles = await Promise.all(withSnapshots(m).flatMap(s => [...s.attachments.values()]).map(async f => {
         console.log('file:', f.url, f.name);
         const file = await createFileFromUrl(f.proxyURL, f.name);
         return chat.uploadFile({ file, isImage: file.type.startsWith('image/') })
       }));
 
-      // embed の画像 (リンクのプレビューなど)。取れなかった画像は飛ばす
-      const embedImages = await Promise.all(embedImageUrls([m, ...snapshots].flatMap(s => s.embeds)).map(async url => {
+      // embed の画像 (リンクのプレビューなど) と返信先の添付ファイル。取れなかったものは飛ばす
+      const extraSources = [
+        ...[m, ...replied].flatMap(msg => embedImageUrls(withSnapshots(msg).flatMap(s => s.embeds))
+          .map(url => ({ url, name: getFileName(url) || 'image', imageOnly: true }))),
+        ...replied.flatMap(msg => withSnapshots(msg).flatMap(s => [...s.attachments.values()]))
+          .map(a => ({ url: a.proxyURL, name: a.name, imageOnly: false })),
+      ];
+      const extraFiles = await Promise.all(extraSources.map(async ({ url, name, imageOnly }) => {
         try {
-          console.log('embed image:', url);
-          const file = await createFileFromUrl(url, getFileName(url) || 'image');
-          if (!file.type.startsWith('image/')) return undefined;
-          return await chat.uploadFile({ file, isImage: true });
+          console.log('file:', url, name);
+          const file = await createFileFromUrl(url, name);
+          const isImage = file.type.startsWith('image/');
+          if (imageOnly && !isImage) return undefined;
+          return await chat.uploadFile({ file, isImage });
         } catch (e) {
-          console.error('failed to load an embed image:', url, e);
+          console.error('failed to load a file:', url, e);
           return undefined;
         }
       }));
-      const files = [...attachmentFiles, ...embedImages.filter(f => f !== undefined)];
+      const files = [...attachmentFiles, ...extraFiles.filter(f => f !== undefined)];
 
       const input = rep + contextBlock;
 

@@ -28,8 +28,9 @@ const formatLine = (m: Message, lastAuthorId: string | null): string => {
 };
 
 /**
- * Builds the context block: recent messages plus the triggering message.
+ * Builds the context block: the replied-to messages, recent messages and the triggering message.
  *
+ * `repliedMessages` come first so they survive when the recent history does not fit.
  * `prefixLength` counts toward the budget because the result is concatenated
  * right after the system prompt.
  */
@@ -38,6 +39,7 @@ export const buildContextBlock = (
   recentMessages: Array<Message<boolean>>,
   lastIds: Snowflake[],
   prefixLength: number,
+  repliedMessages: Array<Message<boolean>> = [],
 ): string => {
   const contextLines: string[] = [];
   let contextLength = prefixLength;
@@ -47,6 +49,26 @@ export const buildContextBlock = (
     const sysLine = `[System] あなたの前回のメッセージID: ${lastIds.join(', ')}`;
     contextLines.push(sysLine);
     contextLength += sysLine.length + 1;
+  }
+
+  // 返信先 (直近の履歴に無いものだけ)。前回の自分の発言より古くても載せる
+  const recentIds = new Set(recentMessages.map(msg => msg.id));
+  const replied = repliedMessages.filter(msg => msg.id !== m.id && !recentIds.has(msg.id));
+  if (replied.length > 0) {
+    const header = '[System] 返信先のメッセージ:';
+    contextLines.push(header);
+    contextLength += header.length + 1;
+    let repliedAuthorId: string | null = null;
+    for (const msg of replied) {
+      const line = formatLine(msg, repliedAuthorId);
+      if (contextLength + line.length + 1 > MAX_CONTEXT_LEN) break;
+      contextLines.push(line);
+      contextLength += line.length + 1;
+      repliedAuthorId = msg.author.id;
+    }
+    const footer = '[System] ここから直近のメッセージ:';
+    contextLines.push(footer);
+    contextLength += footer.length + 1;
   }
 
   let lastAuthorId: string | null = null;
