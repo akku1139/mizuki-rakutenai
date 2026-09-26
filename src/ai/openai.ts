@@ -52,6 +52,8 @@ export class OpenAICompatChat implements ChatSession {
   readonly #config: OpenAICompatConfig;
   #systemPrompt: string = '';
   #history: ChatMessage[] = [];
+  /** 今回の発言を始める前の履歴。失敗や空応答のときはここまで戻す */
+  #historyBeforeTurn: ChatMessage[] = [];
   readonly #tools?: ToolSpec;
 
   constructor(config: OpenAICompatConfig, tools?: ToolSpec) {
@@ -119,9 +121,12 @@ export class OpenAICompatChat implements ChatSession {
 
   /** ツール実行 → 再生成のループ */
   async *#agentLoop(userContent: ChatMessage['content'], meta: unknown): AsyncGenerator<AIEvent> {
+    this.#historyBeforeTurn = [...this.#history];
     this.#history.push({ role: 'user', content: userContent });
     if (this.#history.length > MAX_HISTORY * 2) {
-      this.#history = this.#history.slice(-MAX_HISTORY * 2);
+      // ツール呼び出しとその結果の間で切らないよう、先頭をuserメッセージに揃える
+      const trimmed = this.#history.slice(-MAX_HISTORY * 2);
+      this.#history = trimmed.slice(trimmed.findIndex(m => m.role === 'user'));
     }
 
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
@@ -174,7 +179,7 @@ export class OpenAICompatChat implements ChatSession {
     if (!res.ok || !res.body) {
       const errBody = await res.text().catch(() => '');
       // 失敗時は履歴を汚さない
-      this.#history.pop();
+      this.#history = this.#historyBeforeTurn;
       yield {
         type: 'error',
         code: String(res.status),
@@ -286,8 +291,8 @@ export class OpenAICompatChat implements ChatSession {
     } else if (text.trim() !== '') {
       this.#history.push({ role: 'assistant', content: text });
     } else {
-      // 空応答: 履歴を汚さないようuserメッセージを戻す
-      this.#history.pop();
+      // 空応答: 履歴を汚さないよう、今回の発言 (ツールの実行結果を含む) ごと戻す
+      this.#history = this.#historyBeforeTurn;
     }
 
     if (usageEvent !== undefined) yield usageEvent;

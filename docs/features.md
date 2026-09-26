@@ -16,7 +16,7 @@ Evex の Discord サーバーと Fluxer サーバーで起きた次のイベン�
 - 対象のサーバー ID はコードに書かれています (Discord: `1255359848644608035`、Fluxer: `1493971310876907609`)
 - フッターは `Evex Developers` / `Evex Developers@Fluxer.app` です
 - 本文が変わっていない編集 (埋め込みの展開など) と、ログ用 webhook 自身の投稿の編集は記録しません
-- キャッシュに無いメッセージが削除された場合、投稿者や本文は取得できません
+- キャッシュに無いメッセージが削除された場合、投稿者や本文は取得できません (投稿者は `unknown user` と表示します)
 - Discord の embed の文字数制限を超えないよう、長い本文は末尾を `…` で切り詰めます
 - webhook の設定は環境変数 `DISCORD_LOG_WEBHOOK`、`FLUXER_LOG_WEBHOOK_ID`、`FLUXER_LOG_WEBHOOK_TOKEN` で行います
 

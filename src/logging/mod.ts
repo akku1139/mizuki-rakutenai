@@ -40,6 +40,9 @@ const truncate = (text: string, max: number): string =>
 /** A field value (max 1024) wrapped in a code block. */
 const codeField = (text: string | null): string => '```md\n' + truncate(text ?? '', 1024 - 10) + '\n```';
 
+/** The author is unknown when the message was not cached. */
+const userMention = (u: { id: string } | null | undefined): string => u ? `<@${u.id}>` : 'unknown user';
+
 export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig): void => {
   const sendLog = async (embed: Record<string, unknown>): Promise<void> => {
     await webhook.send({ embeds: [embed] });
@@ -48,12 +51,12 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
   client.on('messageDelete', async m => {
     if (m.guildId !== guildId) return;
     await sendLog({
-      description: `:wastebasket: **Message sent by <@${m.author?.id}> deleted in <#${m.channelId}>.**\n${truncate(m.content ?? '', 3900)}`,
+      description: `:wastebasket: **Message sent by ${userMention(m.author)} deleted in <#${m.channelId}>.**\n${truncate(m.content ?? '', 3900)}`,
       footer: {
         text: footerText,
       },
       author: {
-        name: `${m.author?.username}`,
+        name: m.author?.username ?? 'unknown user',
         icon_url: m.member?.avatarURL() ?? m.author?.avatarURL() ?? undefined,
       },
       timestamp: new Date().toISOString(),
@@ -64,12 +67,12 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
   client.on('messageUpdate', async (o, n) => {
     if (o.guildId !== guildId || o.author?.id === webhook.id || o.content === n.content) return;
     await sendLog({
-      description: `:pencil2: **Message sent by <@${o.author?.id}> edited in <#${o.channelId}>.**  [Jump to Message](${o.url})`,
+      description: `:pencil2: **Message sent by ${userMention(o.author)} edited in <#${o.channelId}>.**  [Jump to Message](${o.url})`,
       footer: {
         text: footerText,
       },
       author: {
-        name: `${o.author?.username}`,
+        name: o.author?.username ?? 'unknown user',
         icon_url: o.member?.avatarURL() ?? o.author?.avatarURL() ?? undefined,
       },
       timestamp: new Date().toISOString(),
