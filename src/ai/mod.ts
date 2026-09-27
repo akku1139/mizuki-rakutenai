@@ -158,6 +158,23 @@ const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, 
   return sentMessages;
 };
 
+const formatTokenUsage = (usage: Extract<AIEvent, { type: 'usage' }>['usage']): string => {
+  const input = usage.inputTokens.toLocaleString();
+  const output = usage.outputTokens.toLocaleString();
+
+  if (usage.cachedInputTokens === undefined) {
+    return `${input} in / ${output} out`;
+  }
+
+  const cached = usage.cachedInputTokens;
+  const uncached = Math.max(usage.inputTokens - cached, 0);
+  const cachedPercent = usage.inputTokens > 0
+    ? (cached / usage.inputTokens * 100).toFixed(1)
+    : '0.0';
+
+  return `${uncached.toLocaleString()} + ${cached.toLocaleString()} (${cachedPercent}% cached) in / ${output} out`;
+};
+
 const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
   if (
     !m.author.bot
@@ -286,6 +303,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       let text = '';
       let c = 0;
+      let usage: Extract<AIEvent, { type: 'usage' }>['usage'] | undefined;
 
       let first = true;
       let last: Message | undefined;
@@ -360,6 +378,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
           case 'usage':
             console.log('usage:', gen.usage);
+            usage = gen.usage;
             break;
 
           default:
@@ -369,7 +388,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       }
 
       text = text.trim();
-      text += `\n-# model: ${chat.label}${toolCount.size > 0 ? ` (${Array.from(toolCount, ([k, v]) => `${k}: ${v}`).join(', ')})` : ""}`;
+      text += `\n-# model: ${chat.label}${toolCount.size > 0 ? ` (${Array.from(toolCount, ([k, v]) => `${k}: ${v}`).join(', ')})` : ""}${usage !== undefined ? ` (tokens: ${formatTokenUsage(usage)})` : ''}`;
       const finalMsgs = await sendMessage(text, m, first);
       sentMessageIds.push(...finalMsgs.map(msg => msg.id));
 
