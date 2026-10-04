@@ -172,7 +172,7 @@ const formatTokenUsage = (usage: Extract<AIEvent, { type: 'usage' }>['usage']): 
     ? (cached / usage.inputTokens * 100).toFixed(1)
     : '0.0';
 
-  return `${uncached.toLocaleString()} + ${cached.toLocaleString()} (${cachedPercent}% cached) in / ${output} out`;
+  return `${uncached.toLocaleString()} + ${cached.toLocaleString()} [${cachedPercent}% cached] in / ${output} out`;
 };
 
 const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
