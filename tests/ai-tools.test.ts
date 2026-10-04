@@ -172,3 +172,35 @@ test('the web tools call their endpoints with the query and a User-Agent, and re
   assert.deepEqual(await executeAITool('wikipedia_read', { title: 'x' }, meta({})),
     [false, { error: 'HTTPステータスコード: 503 (Service Unavailable)' }]);
 });
+
+test('search_web accepts an array of queries and returns results in parallel', async t => {
+  const urls: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    urls.push(url);
+    return new Response(JSON.stringify({ query: { search: [new URL(url).searchParams.get('q')] } }), { status: 200 });
+  });
+
+  const [ok, value] = await executeAITool('search_web', { query: ['a', 'b', 'c'] }, meta({}));
+  assert.equal(ok, true);
+  assert.equal(urls.length, 3);
+  assert.deepEqual(value, [
+    { query: { search: ['a'] } },
+    { query: { search: ['b'] } },
+    { query: { search: ['c'] } },
+  ]);
+});
+
+test('search_web reports HTTP errors per query in the array', async t => {
+  let status = 200;
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    status = new URL(url).searchParams.get('q') === 'bad' ? 503 : 200;
+    return new Response(JSON.stringify({ ok: true }), { status, statusText: status === 200 ? 'OK' : 'Service Unavailable' });
+  });
+
+  const [ok, value] = await executeAITool('search_web', { query: ['good', 'bad'] }, meta({}));
+  assert.equal(ok, true);
+  assert.deepEqual(value, [
+    { ok: true },
+    { error: 'HTTPステータスコード: 503 (Service Unavailable)' },
+  ]);
+});

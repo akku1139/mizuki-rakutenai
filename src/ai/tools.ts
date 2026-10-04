@@ -251,24 +251,40 @@ const readWeb: AITool = {
   },
 };
 
-/// search_web: 検索エンドポイント経由でWeb検索 (SEARCH_ENDPOINT が無い場合は無効)
+/// search_web: 検索エンドポイント経由で Web 検索 (SEARCH_ENDPOINT が無い場合は無効)
 
 const searchWeb: AITool = {
-  description: 'Webを検索します。',
+  description: 'Web を検索します。クエリを 1 つ、または配列で複数渡せます。複数渡すと並列で検索します。',
   parametersJsonSchema: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: '検索クエリ (スペース区切り、Google検索と同じ構文が使用可能)' },
+      query: {
+        anyOf: [
+          { type: 'string', description: '検索クエリ (スペース区切り、Google 検索と同じ構文が使用可能)' },
+          {
+            type: 'array',
+            items: { type: 'string' },
+            description: '検索クエリの配列。並列で検索し、結果を配列で返します',
+          },
+        ],
+      },
     },
     required: ['query'],
   },
   async execute({ query }) {
     try {
-      const res = await fetch(`${new URL(getEnv('SEARCH_ENDPOINT'))}?q=${encodeURIComponent(String(query))}`, {
-        headers: { 'User-Agent': DEFAULT_UA },
-      });
-      if (!res.ok) return [false, { error: `HTTPステータスコード: ${res.status} (${res.statusText})` }];
-      return [true, await res.json()];
+      const queries = Array.isArray(query) ? query : [String(query)];
+      const results = await Promise.all(
+        queries.map(q => (async () => {
+          const res = await fetch(`${new URL(getEnv('SEARCH_ENDPOINT'))}?q=${encodeURIComponent(q)}`, {
+            headers: { 'User-Agent': DEFAULT_UA },
+          });
+          if (!res.ok) return { error: `HTTPステータスコード: ${res.status} (${res.statusText})` };
+          return await res.json();
+        })()),
+      );
+      if (queries.length === 1) return [true, results[0]!];
+      return [true, results];
     } catch (err) {
       return [false, errText(err)];
     }

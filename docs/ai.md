@@ -120,9 +120,9 @@
 | `wikipedia_search` | 日本語版 Wikipedia を検索 | 常に |
 | `wikipedia_read` | 日本語版 Wikipedia の記事本文を取得 | 常に |
 | `read_web` | `GET ${READABILITY_ENDPOINT}?url=<URL>` で Web ページを読む | `READABILITY_ENDPOINT` を設定 |
-| `search_web` | `GET ${SEARCH_ENDPOINT}?q=<クエリ>` で Web 検索 | `SEARCH_ENDPOINT` を設定 |
+| `search_web` | `GET ${SEARCH_ENDPOINT}?q=<クエリ>` で Web 検索（クエリを配列で渡すと並列検索） | `SEARCH_ENDPOINT` を設定 |
 
-`read_web` と `search_web` は、エンドポイントが返した JSON をそのままモデルに渡します。
+`read_web` と `search_web` は、エンドポイントが返した JSON をそのままモデルに渡します。`search_web` にクエリを配列で渡すと、すべてのクエリを並列で実行し、結果を配列で返します（1 クエリのときは単一結果）。
 
 1回の発言につき、ツールの実行とモデルの再生成は最大10回までです。それを超えるとエラーになります。
 1回の API リクエストのタイムアウトは120秒です。
