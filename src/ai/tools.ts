@@ -341,6 +341,7 @@ export const executeAITool = async (
 ): Promise<AIToolResult> => {
   const tool = aitools[name];
   if (!tool) return [false, { error: `function: ${name} は存在しません` }];
+  console.log('tool call:', name, ':', args);
   return tool.execute(args, meta);
 };
 
