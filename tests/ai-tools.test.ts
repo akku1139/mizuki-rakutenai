@@ -158,7 +158,12 @@ test('the web tools call their endpoints with the query and a User-Agent, and re
   });
 
   assert.deepEqual(await executeAITool('wikipedia_search', { query: 'a b' }, meta({})), [true, { search: ['hit'] }]);
-  assert.deepEqual(await executeAITool('search_web', { query: 'a&b' }, meta({})), [true, { query: { search: ['hit'] }, extra: 1 }]);
+  assert.deepEqual(
+    await executeAITool('search_web', { queries: ['a&b'] }, meta({})),
+    [true, [
+      { query: 'a&b', result: { query: { search: ['hit'] }, extra: 1 } },
+    ]],
+  );
   await executeAITool('read_web', { url: 'https://example.com/?x=1' }, meta({}));
   await executeAITool('wikipedia_read', { title: '東京' }, meta({}));
   assert.deepEqual(urls, [
@@ -197,10 +202,10 @@ test('search_web reports HTTP errors per query in the array', async t => {
     return new Response(JSON.stringify({ ok: true }), { status, statusText: status === 200 ? 'OK' : 'Service Unavailable' });
   });
 
-  const [ok, value] = await executeAITool('search_web', { query: ['good', 'bad'] }, meta({}));
+  const [ok, value] = await executeAITool('search_web', { queries: ['good', 'bad'] }, meta({}));
   assert.equal(ok, true);
   assert.deepEqual(value, [
-    { ok: true },
-    { error: 'HTTPステータスコード: 503 (Service Unavailable)' },
+    { query: 'good', result: { ok: true } },
+    { query: 'bad', error: 'HTTPステータスコード: 503 (Service Unavailable)' },
   ]);
 });

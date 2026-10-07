@@ -272,25 +272,23 @@ const searchWeb: AITool = {
     required: ['queries'],
   },
 
-  async execute(args) {
+  async execute({ queries }) {
     try {
-      const rawQueries = args['queries'];
-
-      if (!Array.isArray(rawQueries)) {
+      if (!Array.isArray(queries)) {
         return [false, {
           error: 'queries は文字列の配列で指定してください',
         }];
       }
 
-      if (rawQueries.length < 1 || rawQueries.length > 6) {
+      if (queries.length < 1 || queries.length > 6) {
         return [false, {
           error: 'queries は 1〜6 個指定してください',
         }];
       }
 
-      const queries: string[] = [];
+      const normalizedQueries: string[] = [];
 
-      for (const query of rawQueries) {
+      for (const query of queries) {
         if (typeof query !== 'string') {
           return [false, {
             error: 'queries の各要素は文字列で指定してください',
@@ -304,15 +302,14 @@ const searchWeb: AITool = {
           }];
         }
 
-        queries.push(normalized);
+        normalizedQueries.push(normalized);
       }
 
       const endpoint = new URL(getEnv('SEARCH_ENDPOINT'));
 
       const results = await Promise.all(
-        queries.map(async query => {
-          const url = new URL(endpoint);
-          url.searchParams.set('q', query);
+        normalizedQueries.map(async query => {
+          const url = `${endpoint}?q=${encodeURIComponent(query)}`;
 
           const res = await fetch(url, {
             headers: { 'User-Agent': DEFAULT_UA },
