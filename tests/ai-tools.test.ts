@@ -180,13 +180,13 @@ test('search_web accepts an array of queries and returns results in parallel', a
     return new Response(JSON.stringify({ query: { search: [new URL(url).searchParams.get('q')] } }), { status: 200 });
   });
 
-  const [ok, value] = await executeAITool('search_web', { query: ['a', 'b', 'c'] }, meta({}));
+  const [ok, value] = await executeAITool('search_web', { queries: ['a', 'b', 'c'] }, meta({}));
+
   assert.equal(ok, true);
-  assert.equal(urls.length, 3);
   assert.deepEqual(value, [
-    { query: { search: ['a'] } },
-    { query: { search: ['b'] } },
-    { query: { search: ['c'] } },
+    { query: 'a', result: { query: { search: ['a'] } } },
+    { query: 'b', result: { query: { search: ['b'] } } },
+    { query: 'c', result: { query: { search: ['c'] } } },
   ]);
 });
 

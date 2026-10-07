@@ -251,39 +251,87 @@ const readWeb: AITool = {
   },
 };
 
-/// search_web: 検索エンドポイント経由で Web 検索 (SEARCH_ENDPOINT が無い場合は無効)
-
+/// search_web: 検索エンドポイント経由で Web 検索
+/// 1 回の tool call で複数クエリを並列実行する。
 const searchWeb: AITool = {
-  description: 'Web を検索します。クエリを 1 つ、または配列で複数渡せます。複数渡すと並列で検索します。',
+  description: 'Web を検索します。複数の検索クエリを指定すると並列で検索します。',
   parametersJsonSchema: {
     type: 'object',
     properties: {
-      query: {
-        anyOf: [
-          { type: 'string', description: '検索クエリ (スペース区切り、Google 検索と同じ構文が使用可能)' },
-          {
-            type: 'array',
-            items: { type: 'string' },
-            description: '検索クエリの配列。並列で検索し、結果を配列で返します',
-          },
-        ],
+      queries: {
+        type: 'array',
+        items: {
+          type: 'string',
+          description: '検索クエリ (スペース区切り、Google 検索と同じ構文が使用可能)',
+        },
+        minItems: 1,
+        maxItems: 6,
+        description: '検索クエリの配列。複数指定すると並列で検索します。',
       },
     },
-    required: ['query'],
+    required: ['queries'],
   },
-  async execute({ query }) {
+
+  async execute(args) {
     try {
-      const queries = Array.isArray(query) ? query : [String(query)];
+      const rawQueries = args['queries'];
+
+      if (!Array.isArray(rawQueries)) {
+        return [false, {
+          error: 'queries は文字列の配列で指定してください',
+        }];
+      }
+
+      if (rawQueries.length < 1 || rawQueries.length > 6) {
+        return [false, {
+          error: 'queries は 1〜6 個指定してください',
+        }];
+      }
+
+      const queries: string[] = [];
+
+      for (const query of rawQueries) {
+        if (typeof query !== 'string') {
+          return [false, {
+            error: 'queries の各要素は文字列で指定してください',
+          }];
+        }
+
+        const normalized = query.trim();
+        if (normalized === '') {
+          return [false, {
+            error: 'queries に空の検索クエリは指定できません',
+          }];
+        }
+
+        queries.push(normalized);
+      }
+
+      const endpoint = new URL(getEnv('SEARCH_ENDPOINT'));
+
       const results = await Promise.all(
-        queries.map(q => (async () => {
-          const res = await fetch(`${new URL(getEnv('SEARCH_ENDPOINT'))}?q=${encodeURIComponent(q)}`, {
+        queries.map(async query => {
+          const url = new URL(endpoint);
+          url.searchParams.set('q', query);
+
+          const res = await fetch(url, {
             headers: { 'User-Agent': DEFAULT_UA },
           });
-          if (!res.ok) return { error: `HTTPステータスコード: ${res.status} (${res.statusText})` };
-          return await res.json();
-        })()),
+
+          if (!res.ok) {
+            return {
+              query,
+              error: `HTTPステータスコード: ${res.status} (${res.statusText})`,
+            };
+          }
+
+          return {
+            query,
+            result: await res.json(),
+          };
+        }),
       );
-      if (queries.length === 1) return [true, results[0]!];
+
       return [true, results];
     } catch (err) {
       return [false, errText(err)];
