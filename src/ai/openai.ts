@@ -15,21 +15,6 @@ export interface OpenAICompatConfig {
   model: string,
 }
 
-interface ChatMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool',
-  content: string | null | OpenAIContentPart[],
-  tool_calls?: Array<{
-    id: string,
-    type: 'function',
-    function: { name: string, arguments: string },
-  }>,
-  tool_call_id?: string,
-}
-
-type OpenAIContentPart =
-  | { type: 'text', text: string }
-  | { type: 'image_url', image_url: { url: string } };
-
 const MAX_HISTORY = 40; // 保持するやり取りの上限 (system除く)
 const MAX_TOOL_ROUNDS = 10; // 1回の発言でツールを実行して再生成する上限
 const MAX_TEXT_ATTACHMENT_CHARS = 20_000;
@@ -52,9 +37,9 @@ export class OpenAICompatChat implements ChatSession {
   readonly #config: OpenAICompatConfig;
   readonly #client: OpenAI;
   #systemPrompt: string = '';
-  #history: ChatMessage[] = [];
+  #history: OpenAI.Chat.ChatCompletionMessageParam[] = [];
   /** 今回の発言を始める前の履歴。失敗や空応答のときはここまで戻す */
-  #historyBeforeTurn: ChatMessage[] = [];
+  #historyBeforeTurn: OpenAI.Chat.ChatCompletionMessageParam[] = [];
   readonly #tools?: ToolSpec;
 
   constructor(config: OpenAICompatConfig, tools?: ToolSpec) {
@@ -108,11 +93,11 @@ export class OpenAICompatChat implements ChatSession {
     const files = message.contents
       .filter((c): c is { type: 'file', file: ChatFile } => c.type === 'file')
       .map(c => c.file);
-    const userContent: ChatMessage['content'] = files.length === 0
+    const userContent: string | Array<OpenAI.Chat.ChatCompletionContentPart> = files.length === 0
       ? userText
       : [
           ...(userText ? [{ type: 'text' as const, text: userText }] : []),
-          ...files.map((file): OpenAIContentPart => {
+          ...files.map((file): OpenAI.Chat.ChatCompletionContentPart => {
             if (file.isImage) {
               return { type: 'image_url', image_url: { url: file.fileUrl } };
             }
@@ -130,7 +115,7 @@ export class OpenAICompatChat implements ChatSession {
   }
 
   /** ツール実行 → 再生成のループ */
-  async *#agentLoop(userContent: ChatMessage['content'], meta: unknown): AsyncGenerator<AIEvent> {
+  async *#agentLoop(userContent: string | Array<OpenAI.Chat.ChatCompletionContentPart>, meta: unknown): AsyncGenerator<AIEvent> {
     this.#historyBeforeTurn = [...this.#history];
     this.#history.push({ role: 'user', content: userContent });
     if (this.#history.length > MAX_HISTORY * 2) {
@@ -158,7 +143,7 @@ export class OpenAICompatChat implements ChatSession {
 
   /** 1回分の chat/completions をストリーミング実行し、必要ならツールを実行する */
   async *#complete(meta: unknown): AsyncGenerator<AIEvent> {
-    const messages: ChatMessage[] = [
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       ...(this.#systemPrompt ? [{ role: 'system' as const, content: this.#systemPrompt }] : []),
       ...this.#history,
     ];
@@ -167,7 +152,7 @@ export class OpenAICompatChat implements ChatSession {
     try {
       stream = await this.#client.chat.completions.create({
         model: this.#config.model,
-        messages: messages as unknown as OpenAI.Chat.ChatCompletionMessageParam[],
+        messages: messages,
         stream: true,
         stream_options: { include_usage: true },
         ...(this.#tools !== undefined && this.#tools.definitions.length > 0 ? { tools: this.#tools.definitions as unknown as OpenAI.Chat.ChatCompletionTool[] } : {}),
