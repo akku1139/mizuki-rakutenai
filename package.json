@@ -14,7 +14,8 @@
     "@evex/rakutenai": "jsr:^0.1.19",
     "@makeitaquote/openmiq": "^1.2.0",
     "discord.js": "^14.27.0",
-    "google-protobuf": "^4.0.2"
+    "google-protobuf": "^4.0.2",
+    "openai": "^7.32.0"
   },
   "devDependencies": {
     "@types/google-protobuf": "^3.15.12",

@@ -5,7 +5,7 @@
 /// 結果を送り返すエージェントループを内部で回す。
 
 import type { AIEvent, ChatContents, ChatFile, ChatSession, ToolSpec } from './types.ts';
-import { fetchWithRateLimitRetry } from './ratelimit.ts';
+import OpenAI, { APIError } from 'openai';
 
 export interface OpenAICompatConfig {
   /** 例: https://api.openai.com/v1 (末尾に / を付けない) */
@@ -50,6 +50,7 @@ export class OpenAICompatChat implements ChatSession {
   readonly id: string;
 
   readonly #config: OpenAICompatConfig;
+  readonly #client: OpenAI;
   #systemPrompt: string = '';
   #history: ChatMessage[] = [];
   /** 今回の発言を始める前の履歴。失敗や空応答のときはここまで戻す */
@@ -58,6 +59,15 @@ export class OpenAICompatChat implements ChatSession {
 
   constructor(config: OpenAICompatConfig, tools?: ToolSpec) {
     this.#config = config;
+    this.#client = new OpenAI({
+      baseURL: config.baseUrl,
+      apiKey: config.apiKey,
+      defaultHeaders: {
+        'HTTP-Referer': 'https://github.com/akku1139/mizuki-rakutenai',
+        'X-OpenRouter-Title': 'mizuki-rakutenai',
+        'X-OpenRouter-Categories': 'general-chat',
+      },
+    });
     this.#tools = tools;
     // チャンネルごとにインスタンスが作られるので、IDはランダムで一意にする
     this.id = crypto.randomUUID();
@@ -153,37 +163,24 @@ export class OpenAICompatChat implements ChatSession {
       ...this.#history,
     ];
 
-    const body: Record<string, unknown> = {
-      model: this.#config.model,
-      messages,
-      stream: true,
-      stream_options: { include_usage: true },
-    };
-    if (this.#tools !== undefined && this.#tools.definitions.length > 0) {
-      body.tools = this.#tools.definitions;
-    }
-
-    const res = await fetchWithRateLimitRetry(() => fetch(`${this.#config.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.#config.apiKey}`,
-        "HTTP-Referer": "https://github.com/akku1139/mizuki-rakutenai",
-        "X-OpenRouter-Title": "mizuki-rakutenai",
-        "X-OpenRouter-Categories": "general-chat",
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(120_000),
-    }));
-
-    if (!res.ok || !res.body) {
-      const errBody = await res.text().catch(() => '');
+    let stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk> | undefined;
+    try {
+      stream = await this.#client.chat.completions.create({
+        model: this.#config.model,
+        messages: messages as unknown as OpenAI.Chat.ChatCompletionMessageParam[],
+        stream: true,
+        stream_options: { include_usage: true },
+        ...(this.#tools !== undefined && this.#tools.definitions.length > 0 ? { tools: this.#tools.definitions as unknown as OpenAI.Chat.ChatCompletionTool[] } : {}),
+      }, { timeout: 120_000 }) as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
+    } catch (err) {
       // 失敗時は履歴を汚さない
       this.#history = this.#historyBeforeTurn;
+      const message = err instanceof Error ? err.message : String(err);
+      const status = (err as APIError)?.status ?? '-';
       yield {
         type: 'error',
-        code: String(res.status),
-        message: `OpenAI-compat API error: ${res.status} ${errBody.slice(0, 500)}`,
+        code: String(status),
+        message: `OpenAI-compat API error: ${message.slice(0, 500)}`,
         trace: { id: '-', url: `${this.#config.baseUrl}/chat/completions` },
         threadId: this.id,
       };
@@ -196,43 +193,56 @@ export class OpenAICompatChat implements ChatSession {
     let finishReason: string | undefined;
     let usageEvent: AIEvent | undefined;
 
-    for await (const chunk of sseLines(res.body)) {
-      for (const choice of (chunk as any).choices ?? []) {
-        const delta = choice.delta ?? {};
+    try {
+      for await (const chunk of stream) {
+        for (const choice of chunk.choices ?? []) {
+          const delta = (choice.delta ?? {}) as OpenAI.Chat.ChatCompletionChunk.Choice.Delta;
 
-        if (Array.isArray(delta.tool_calls)) {
-          for (const tc of delta.tool_calls) {
-            const slot = toolCalls.get(tc.index ?? 0) ?? { id: tc.id ?? '', name: '', arguments: '' };
-            if (tc.id) slot.id = tc.id;
-            if (tc.function?.name) slot.name += tc.function.name;
-            if (typeof tc.function?.arguments === 'string') slot.arguments += tc.function.arguments;
-            toolCalls.set(tc.index ?? 0, slot);
+          if (Array.isArray(delta.tool_calls)) {
+            for (const tc of delta.tool_calls) {
+              const slot = toolCalls.get(tc.index ?? 0) ?? { id: tc.id ?? '', name: '', arguments: '' };
+              if (tc.id) slot.id = tc.id;
+              if (tc.function?.name) slot.name += tc.function.name;
+              if (typeof tc.function?.arguments === 'string') slot.arguments += tc.function.arguments;
+              toolCalls.set(tc.index ?? 0, slot);
+            }
+            continue;
           }
-          continue;
+
+          // reasoning は SDK のこのバージョンでは Delta に含まれていないため無視
+          const piece = delta.content;
+          if (typeof piece === 'string' && piece.length > 0) {
+            text += piece;
+            yield { type: 'text-delta', text: piece };
+          }
+          if (choice.finish_reason != null) finishReason = choice.finish_reason;
         }
 
-        if (delta.reasoning_content != null || delta.reasoning != null) {
-          continue; // reasoningは表示のみで履歴には入れない (ここでは無視)
+        const usage = chunk.usage;
+        if (usage != null) {
+          usageEvent = {
+            type: 'usage',
+            usage: {
+              inputTokens: usage.prompt_tokens ?? 0,
+              outputTokens: usage.completion_tokens ?? 0,
+              cachedInputTokens: usage.prompt_tokens_details?.cached_tokens,
+            },
+          };
         }
-        const piece = typeof choice.text === 'string' && delta.content == null ? choice.text : delta.content;
-        if (typeof piece === 'string' && piece.length > 0) {
-          text += piece;
-          yield { type: 'text-delta', text: piece };
-        }
-        if (choice.finish_reason != null) finishReason = choice.finish_reason;
       }
-
-      const usage = (chunk as any).usage;
-      if (usage != null) {
-        usageEvent = {
-          type: 'usage',
-          usage: {
-            inputTokens: usage.prompt_tokens ?? 0,
-            outputTokens: usage.completion_tokens ?? 0,
-            cachedInputTokens: usage.prompt_tokens_details?.cached_tokens,
-          },
-        };
-      }
+    } catch (err) {
+      // ストリーム中断時も履歴を汚さない
+      this.#history = this.#historyBeforeTurn;
+      const message = err instanceof Error ? err.message : String(err);
+      const status = (err as APIError)?.status ?? (err as APIError)?.code ?? '-';
+      yield {
+        type: 'error',
+        code: String(status),
+        message: `OpenAI-compat API error (stream): ${message.slice(0, 500)}`,
+        trace: { id: '-', url: `${this.#config.baseUrl}/chat/completions` },
+        threadId: this.id,
+      };
+      return;
     }
 
     // IDが無いツール呼び出しには、assistant側とtool側で同じIDを振る
@@ -297,30 +307,5 @@ export class OpenAICompatChat implements ChatSession {
 
     if (usageEvent !== undefined) yield usageEvent;
     yield { type: 'done', messageIds: [this.id] };
-  }
-}
-
-/** SSE (data: ...) をパースしてJSONチャンクごとに返す */
-async function* sseLines(body: ReadableStream<Uint8Array>): AsyncGenerator<unknown> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let i: number;
-    while ((i = buf.indexOf('\n')) !== -1) {
-      const line = buf.slice(0, i).trim();
-      buf = buf.slice(i + 1);
-      if (!line.startsWith('data:')) continue;
-      const payload = line.slice(5).trim();
-      if (payload === '[DONE]') return;
-      try {
-        yield JSON.parse(payload);
-      } catch {
-        // keep-alive コメント等は無視
-      }
-    }
   }
 }
