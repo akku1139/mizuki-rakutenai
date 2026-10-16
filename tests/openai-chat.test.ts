@@ -46,6 +46,8 @@ test('the request carries the model, the key and the system prompt with the serv
   const [req] = requests;
   assert.equal(req!.url, 'https://llm.invalid/v1/chat/completions');
   assert.equal(req!.headers['Authorization'], 'Bearer secret');
+  assert.match(req!.headers['x-opencode-session']!, /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+  assert.equal(req!.headers['x-opencode-session'], chat.id);
   assert.equal(req!.body.model, 'test-model');
   assert.equal(req!.body.stream, true);
   assert.equal(req!.body.tools, undefined);
@@ -85,6 +87,7 @@ test('the reply is kept in the history for the next turn', async t => {
     { role: 'assistant', content: 'first reply' },
     { role: 'user', content: 'two' },
   ]);
+  assert.equal(requests[1]!.headers['x-opencode-session'], requests[0]!.headers['x-opencode-session']);
 });
 
 test('an HTTP error yields an error event and leaves the history as it was', async t => {

@@ -19,6 +19,23 @@ const MAX_HISTORY = 40; // 保持するやり取りの上限 (system除く)
 const MAX_TOOL_ROUNDS = 10; // 1回の発言でツールを実行して再生成する上限
 const MAX_TEXT_ATTACHMENT_CHARS = 20_000;
 
+const OPENCODE_SESSION_SUFFIX_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+
+const createOpenCodeSessionId = (): string => {
+  const timestamp = Date.now().toString(16).padStart(12, '0').slice(-12);
+  let suffix = '';
+  while (suffix.length < 14) {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    for (const byte of bytes) {
+      // 248 is divisible by 62, so this avoids modulo bias.
+      if (byte >= 248) continue;
+      suffix += OPENCODE_SESSION_SUFFIX_ALPHABET[byte % OPENCODE_SESSION_SUFFIX_ALPHABET.length]!;
+      if (suffix.length === 14) break;
+    }
+  }
+  return `ses_${timestamp}${suffix}`;
+};
+
 const textFromFile = (file: ChatFile): string | undefined => {
   const dataUrl = /^data:([^;,]+);base64,(.*)$/s.exec(file.fileUrl);
   if (!dataUrl || !/^text\/|^application\/(?:json|xml|x-yaml|yaml|csv)$/i.test(
@@ -44,6 +61,8 @@ export class OpenAICompatChat implements ChatSession {
 
   constructor(config: OpenAICompatConfig, tools?: ToolSpec) {
     this.#config = config;
+    // OpenCode Go uses this ID to route requests belonging to the same chat session.
+    this.id = createOpenCodeSessionId();
     this.#client = new OpenAI({
       baseURL: config.baseUrl,
       apiKey: config.apiKey,
@@ -51,11 +70,10 @@ export class OpenAICompatChat implements ChatSession {
         'HTTP-Referer': 'https://github.com/akku1139/mizuki-rakutenai',
         'X-OpenRouter-Title': 'mizuki-rakutenai',
         'X-OpenRouter-Categories': 'general-chat',
+        'x-opencode-session': this.id,
       },
     });
     this.#tools = tools;
-    // チャンネルごとにインスタンスが作られるので、IDはランダムで一意にする
-    this.id = crypto.randomUUID();
     this.label = config.model;
   }
 
