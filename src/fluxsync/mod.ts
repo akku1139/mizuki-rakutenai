@@ -9,6 +9,7 @@ import {
   type Message,
   type MessageReaction,
   type OmitPartialGroupDMChannel,
+  type PartialMessage,
   type PartialMessageReaction,
   type PartialUser,
   type Snowflake,
@@ -16,6 +17,7 @@ import {
   type User as DiscordUser,
 } from 'discord.js';
 import { discord, fluxer } from '../clients.ts';
+import { toSendableEmbeds } from './embeds.ts';
 import { saveWhMap, whMapDiscord, whMapFluxer, type WebhookLink } from './state.ts';
 
 // TODO:
@@ -33,6 +35,19 @@ const linkMessages = (discordId: Snowflake, fluxerId: Snowflake) => {
     const oldest = m.keys().next();
     if (!oldest.done) m.delete(oldest.value);
   }
+};
+
+/**
+ * Sends still in progress, keyed by the source message ID.
+ * Link previews arrive as an update right after the message, often before the send finishes.
+ */
+const inFlight = new Map<Snowflake, Promise<void>>();
+
+const track = (id: Snowflake, send: Promise<void>): Promise<void> => {
+  inFlight.set(id, send);
+  const done = () => { inFlight.delete(id); };
+  send.then(done, done);
+  return send;
 };
 
 /** Each WebhookClient owns its own REST rate limit buckets. */
@@ -66,6 +81,7 @@ const onDiscordMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<
   console.log('sending a message to fluxer:', m.id);
   const targetInfo = whMapFluxer[whInfo.targetChannelID];
   const repliedId = dToF.get(m.reference?.messageId ?? '');
+  const embeds = toSendableEmbeds(m.embeds);
 
   const formData = new FormData();
   formData.append('payload_json', JSON.stringify({
@@ -76,7 +92,8 @@ const onDiscordMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<
     username: `${m.member?.nickname ?? m.author.displayName}#Discord`,
     avatar_url: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
     content: convertEmojis(m.content, guildOfChannel(fluxer, whInfo.targetChannelID)) + stickerLinks(m.stickers),
-    embeds: m.embeds,
+    // An explicit empty list could stop the receiver from unfurling links itself.
+    embeds: embeds.length > 0 ? embeds : undefined,
     attachments: Array.from(m.attachments.values()).map((a, i) => ({
       id: i,
       filename: a.name,
@@ -144,12 +161,48 @@ const onFluxerMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<v
     username: `${m.member?.nickname ?? m.author.displayName}#Fluxer`,
     avatarURL: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
     content: (replyLine + convertEmojis(m.content, targetGuild) + stickerLinks(m.stickers)).slice(0, 2000),
-    embeds: m.embeds,
+    embeds: toSendableEmbeds(m.embeds, { dropPreviews: true }),
     files: [...m.attachments.values()],
     tts: m.tts,
     withComponents: false,
   });
   linkMessages(sent.id, m.id);
+};
+
+type UpdatedMessage = OmitPartialGroupDMChannel<Message | PartialMessage>;
+
+/** Returns the embeds to send when they changed, e.g. when a link preview was generated. */
+const changedEmbeds = (o: UpdatedMessage, n: UpdatedMessage, dropPreviews: boolean) => {
+  const embeds = toSendableEmbeds(n.embeds, { dropPreviews });
+  return JSON.stringify(embeds) === JSON.stringify(toSendableEmbeds(o.embeds, { dropPreviews })) ? undefined : embeds;
+};
+
+const onDiscordUpdate = async (o: UpdatedMessage, n: UpdatedMessage): Promise<void> => {
+  const whInfo = whMapDiscord[n.channelId];
+  if (!whInfo || n.author?.id === whInfo.whID) return;
+  const embeds = changedEmbeds(o, n, false);
+  if (embeds === undefined) return;
+  await inFlight.get(n.id)?.catch(() => {});
+  const fluxerId = dToF.get(n.id);
+  if (fluxerId === undefined) return;
+  const targetInfo = whMapFluxer[whInfo.targetChannelID];
+  const res = await fetch(`https://api.fluxer.app/webhooks/${targetInfo.whID}/${targetInfo.whToken}/messages/${fluxerId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ embeds }),
+  });
+  if (!res.ok) console.error('fluxer webhook edit error:', res.status, await res.text());
+};
+
+const onFluxerUpdate = async (o: UpdatedMessage, n: UpdatedMessage): Promise<void> => {
+  const whInfo = whMapFluxer[n.channelId];
+  if (!whInfo || n.author?.id === whInfo.whID) return;
+  const embeds = changedEmbeds(o, n, true);
+  if (embeds === undefined) return;
+  await inFlight.get(n.id)?.catch(() => {});
+  const discordId = fToD.get(n.id);
+  if (discordId === undefined) return;
+  await getDiscordWH(whMapDiscord[whInfo.targetChannelID]).editMessage(discordId, { embeds });
 };
 
 const bridgeReactions = (from: Client, to: Client, idMap: Map<Snowflake, Snowflake>, whMap: Record<string, WebhookLink>): void => {
@@ -172,8 +225,10 @@ const bridgeReactions = (from: Client, to: Client, idMap: Map<Snowflake, Snowfla
 };
 
 export const setupFluxSync = (): void => {
-  discord.on('messageCreate', onDiscordMessage);
-  fluxer.on('messageCreate', onFluxerMessage);
+  discord.on('messageCreate', m => track(m.id, onDiscordMessage(m)));
+  fluxer.on('messageCreate', m => track(m.id, onFluxerMessage(m)));
+  discord.on('messageUpdate', (o, n) => void onDiscordUpdate(o, n).catch(e => console.error('fluxsync embed update failed:', e)));
+  fluxer.on('messageUpdate', (o, n) => void onFluxerUpdate(o, n).catch(e => console.error('fluxsync embed update failed:', e)));
   bridgeReactions(discord, fluxer, dToF, whMapDiscord);
   bridgeReactions(fluxer, discord, fToD, whMapFluxer);
 };
