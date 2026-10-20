@@ -309,6 +309,8 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       let last: Message | undefined;
       const sentMessageIds: Snowflake[] = [];
 
+      let toolLogMsg: Message | undefined;
+
       for await (const gen of res) {
         if (++c % 7 === 0)
           m.channel.sendTyping();
@@ -362,8 +364,11 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
           case 'tool-call-detail':
             console.log('fc:', gen);
             toolCount.set(gen.data.name, (toolCount.get(gen.data.name) ?? 0) + 1);
-            // 進捗表示 (evex-quotesと同様)
-            await m.channel.send(`-# ${gen.data.description !== '' ? `${gen.data.description} ` : ''}(${gen.data.name})...`);
+            const toolText = `-# ${gen.data.description !== '' ? `${gen.data.description} ` : ''}(${gen.data.name})...`
+            if (!toolLogMsg)
+              toolLogMsg = await m.channel.send(toolText);
+            else
+              toolLogMsg.edit(toolText);
             break;
 
           case 'tool-result':
