@@ -178,7 +178,7 @@ const formatTokenUsage = (usage: Extract<AIEvent, { type: 'usage' }>['usage']): 
 const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
   if (
     !m.author.bot
-    && (m.mentions.users.has(DISCORD_USER_ID) || m.mentions.users.has(FLUXER_USER_ID))
+    && (m.mentions.users.has(DISCORD_USER_ID) || m.mentions.users.has(FLUXER_USER_ID) || /mizuki|瑞稀/i.test(m.content))
     && (m.channel instanceof TextChannel || m.channel instanceof ThreadChannel)
     && m.guild !== null
   ) {
