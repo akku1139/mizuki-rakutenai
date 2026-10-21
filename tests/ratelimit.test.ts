@@ -98,6 +98,39 @@ test('429 during tool follow-up retries the same request without executing the t
   assert.ok(events.some(e => e.type === 'text-delta' && e.text === 'finished'));
 });
 
+/** 429 は ratelimit.ts の設定で待って再送し、他のエラーは即座に返る */
+test('the chat client retries a 429 through ratelimit.ts and gives up when it has to', async t => {
+  const sse = new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+  let failing = 0;
+  const responses = [() => new Response('busy', { status: 429, headers: { 'Retry-After': '0' } }), () => sse];
+  t.mock.method(globalThis, 'fetch', async () => {
+    failing++;
+    return (responses[Math.min(failing, responses.length) - 1]!)();
+  });
+  const config = { baseUrl: 'https://unused.invalid/v1', apiKey: 'test', model: 'test' };
+
+  // 1回目の 429 は待って再送し、同じ発言として成功する
+  const chat = new OpenAICompatChat(config);
+  const events = [];
+  for await (const event of chat.sendMessage({ contents: [{ type: 'text', text: 'hello' }] })) events.push(event);
+  assert.equal(failing, 2);
+  assert.ok(events.some(e => e.type === 'text-delta' && e.text === 'ok'));
+
+  // 429 が続くときは ratelimit.ts の上限 (初回 + 3回) で諦めて、エラーを返す
+  let tries = 0;
+  t.mock.restoreAll();
+  t.mock.method(globalThis, 'fetch', async () => {
+    tries++;
+    return new Response('busy', { status: 429, headers: { 'Retry-After': '0' } });
+  });
+  const stuck = [];
+  for await (const event of new OpenAICompatChat(config).sendMessage({ contents: [{ type: 'text', text: 'hello' }] })) stuck.push(event);
+  assert.equal(tries, 4);
+  assert.equal(stuck.length, 1);
+  assert.equal(stuck[0]!.type, 'error');
+  assert.equal((stuck[0] as { code: string }).code, '429');
+});
+
 test('OpenAI chat includes image and text attachments in the request', async t => {
   let requestBody: { messages: Array<{ role: string, content: unknown }> } | undefined;
   t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {

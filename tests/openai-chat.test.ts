@@ -29,7 +29,8 @@ const say = (chat: OpenAICompatChat, text: string) => collect(chat, [{ type: 'te
 const mockFetch = (t: { mock: { method: Function } }, ...responses: Array<() => Response>) => {
   const requests: Array<{ url: string, headers: Record<string, string>, body: Body }> = [];
   t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
-    requests.push({ url, headers: init.headers as Record<string, string>, body: JSON.parse(String(init.body)) });
+    // SDK は Headers インスタンスを渡してくるので、テストでは素の object に均す
+    requests.push({ url, headers: Object.fromEntries(new Headers(init.headers).entries()), body: JSON.parse(String(init.body)) });
     const next = responses[Math.min(requests.length, responses.length) - 1]!;
     return next();
   });
@@ -45,7 +46,8 @@ test('the request carries the model, the key and the system prompt with the serv
 
   const [req] = requests;
   assert.equal(req!.url, 'https://llm.invalid/v1/chat/completions');
-  assert.equal(req!.headers['Authorization'], 'Bearer secret');
+  // Headers は名前を小文字に均す (HTTP のヘッダー名は大文字小文字を区別しない)
+  assert.equal(req!.headers['authorization'], 'Bearer secret');
   assert.match(req!.headers['x-opencode-session']!, /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
   assert.equal(req!.headers['x-opencode-session'], chat.id);
   assert.equal(req!.body.model, 'test-model');
@@ -63,6 +65,7 @@ test('streamed text is yielded piece by piece, even when a line is split across 
     delta({ reasoning_content: 'thinking' }),
     delta({ content: 'Hel' }).slice(0, 10), delta({ content: 'Hel' }).slice(10),
     ': keep-alive\n\n',
+    // 古いスタイル (completions系) は本文が choices[].text に載る
     data({ choices: [{ text: 'lo', delta: {} }] }),
     data({ choices: [], usage: { prompt_tokens: 3, completion_tokens: 2, prompt_tokens_details: { cached_tokens: 1 } } }),
     done,
@@ -70,11 +73,64 @@ test('streamed text is yielded piece by piece, even when a line is split across 
   const chat = new OpenAICompatChat(config);
   const events = await say(chat, 'hi');
   assert.deepEqual(events, [
+    { type: 'reasoning-start' },
+    { type: 'reasoning-delta', text: 'thinking' },
     { type: 'text-delta', text: 'Hel' },
     { type: 'text-delta', text: 'lo' },
     { type: 'usage', usage: { inputTokens: 3, outputTokens: 2, cachedInputTokens: 1 } },
     { type: 'done', messageIds: [chat.id] },
   ]);
+});
+
+test('streamed reasoning becomes one reasoning-start then reasoning-deltas, from either field name', async t => {
+  mockFetch(t, () => stream(
+    delta({ reasoning_content: '考え' }),
+    delta({ reasoning: '中' }),
+    delta({ content: 'answer' }),
+    done,
+  ));
+  const chat = new OpenAICompatChat(config);
+  assert.deepEqual(await say(chat, 'hi'), [
+    { type: 'reasoning-start' },
+    { type: 'reasoning-delta', text: '考え' },
+    { type: 'reasoning-delta', text: '中' },
+    { type: 'text-delta', text: 'answer' },
+    { type: 'done', messageIds: [chat.id] },
+  ]);
+});
+
+test('reasoning on a tool-call round is shown but never replayed into the history', async t => {
+  const tools: ToolSpec = {
+    definitions: [{ type: 'function', function: { name: 'lookup' } }],
+    execute: async () => [true, { found: 42 }],
+  };
+  const requests = mockFetch(t,
+    () => stream(
+      delta({ reasoning_content: 'ツールを使う' }),
+      delta({ tool_calls: [{ index: 0, id: 'call_1', function: { name: 'lookup', arguments: '{}' } }] }),
+      done,
+    ),
+    () => stream(delta({ reasoning_content: 'thinking' }), delta({ content: 'answer' }), done),
+  );
+  const chat = new OpenAICompatChat(config, tools);
+  const events = await say(chat, 'q');
+
+  assert.deepEqual(events.filter(e => e.type.startsWith('reasoning')), [
+    { type: 'reasoning-start' },
+    { type: 'reasoning-delta', text: 'ツールを使う' },
+    { type: 'reasoning-start' },
+    { type: 'reasoning-delta', text: 'thinking' },
+  ]);
+  // reasoning はリクエストのメッセージにも、返信本文にも混ざらない
+  for (const message of requests[1]!.body.messages) {
+    assert.notEqual((message as { reasoning_content?: unknown }).reasoning_content, 'ツールを使う');
+  }
+  assert.equal(requests[1]!.body.messages[1]!.content, null);
+  assert.deepEqual(requests[1]!.body.messages.slice(1), [
+    { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{}' } }] },
+    { role: 'tool', content: '{"found":42}', tool_call_id: 'call_1' },
+  ]);
+  assert.ok(!events.some(e => e.type === 'text-delta' && /ツールを使う|thinking/.test(e.text)));
 });
 
 test('the reply is kept in the history for the next turn', async t => {
@@ -98,6 +154,9 @@ test('an HTTP error yields an error event and leaves the history as it was', asy
   assert.equal(events.length, 1);
   assert.equal(events[0]!.type, 'error');
   assert.match((events[0] as { message: string }).message, /500 boom/);
+
+  // サーバーエラーは SDK に再送させない (再試行は 429 のときだけ、ratelimit.ts の設定に従う)
+  assert.equal(requests.length, 1);
 
   status = 200;
   await say(chat, 'works');

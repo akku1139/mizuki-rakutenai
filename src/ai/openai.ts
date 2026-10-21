@@ -6,6 +6,7 @@
 
 import type { AIEvent, ChatContents, ChatFile, ChatSession, ToolSpec } from './types.ts';
 import OpenAI, { APIError } from 'openai';
+import { fetchWithRateLimitRetry } from './ratelimit.ts';
 
 export interface OpenAICompatConfig {
   /** 例: https://api.openai.com/v1 (末尾に / を付けない) */
@@ -34,6 +35,23 @@ const createOpenCodeSessionId = (): string => {
     }
   }
   return `ses_${timestamp}${suffix}`;
+};
+
+/**
+ * 思考過程 (reasoning) のフィールド。
+ * OpenAI 公式のスキーマには無いが、互換サーバーは次のどちらかで返す。
+ * - reasoning_content: DeepSeek、vLLM、SGLang、GLM など
+ * - reasoning: OpenRouter など
+ */
+interface ReasoningDelta {
+  reasoning_content?: string | null,
+  reasoning?: string | null,
+}
+
+const reasoningText = (delta: ReasoningDelta): string => {
+  if (typeof delta.reasoning_content === 'string') return delta.reasoning_content;
+  if (typeof delta.reasoning === 'string') return delta.reasoning;
+  return '';
 };
 
 const textFromFile = (file: ChatFile): string | undefined => {
@@ -66,6 +84,10 @@ export class OpenAICompatChat implements ChatSession {
     this.#client = new OpenAI({
       baseURL: config.baseUrl,
       apiKey: config.apiKey,
+      // 429 の再試行は ratelimit.ts の設定 (待ち時間・回数・諦める条件) に一本化する。
+      // SDK 側にも再試行があるので、二重に再送しないよう向こうは止める。
+      maxRetries: 0,
+      fetch: (url, init) => fetchWithRateLimitRetry(() => fetch(url, init)),
       defaultHeaders: {
         'HTTP-Referer': 'https://github.com/akku1139/mizuki-rakutenai',
         'X-OpenRouter-Title': 'mizuki-rakutenai',
@@ -195,11 +217,24 @@ export class OpenAICompatChat implements ChatSession {
     const toolCalls = new Map<number, { id: string, name: string, arguments: string }>();
     let finishReason: string | undefined;
     let usageEvent: AIEvent | undefined;
+    /** reasoning は表示用。履歴には入れない (入れ直すとモデル次第でループする) */
+    let sawReasoning = false;
 
     try {
       for await (const chunk of stream) {
         for (const choice of chunk.choices ?? []) {
           const delta = (choice.delta ?? {}) as OpenAI.Chat.ChatCompletionChunk.Choice.Delta;
+
+          // reasoning は SDK の型に無いので、互換サーバーの独自フィールドから拾う。
+          // ツール呼び出しと同じチャンクに載ることもあるため、先に処理する
+          const reasoning = reasoningText(delta as ReasoningDelta);
+          if (reasoning.length > 0) {
+            if (!sawReasoning) {
+              sawReasoning = true;
+              yield { type: 'reasoning-start' };
+            }
+            yield { type: 'reasoning-delta', text: reasoning };
+          }
 
           if (Array.isArray(delta.tool_calls)) {
             for (const tc of delta.tool_calls) {
@@ -212,13 +247,17 @@ export class OpenAICompatChat implements ChatSession {
             continue;
           }
 
-          // reasoning は SDK のこのバージョンでは Delta に含まれていないため無視
-          const piece = delta.content;
+          if (choice.finish_reason != null) finishReason = choice.finish_reason;
+
+          // 古いスタイル (completions系) は delta.content ではなく choices[].text に本文が載る
+          const legacyText = (choice as { text?: unknown }).text;
+          const piece = typeof legacyText === 'string' && delta.content == null
+            ? legacyText
+            : delta.content;
           if (typeof piece === 'string' && piece.length > 0) {
             text += piece;
             yield { type: 'text-delta', text: piece };
           }
-          if (choice.finish_reason != null) finishReason = choice.finish_reason;
         }
 
         const usage = chunk.usage;
