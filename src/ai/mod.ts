@@ -396,6 +396,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       text += `\n-# model: ${chat.label}${toolCount.size > 0 ? ` (${Array.from(toolCount, ([k, v]) => `${k}: ${v}`).join(', ')})` : ""}${usage !== undefined ? ` (tokens: ${formatTokenUsage(usage)})` : ''}`;
       const finalMsgs = await sendMessage(text, m, first);
       sentMessageIds.push(...finalMsgs.map(msg => msg.id));
+      if (toolLogMsg) toolLogMsg.delete();
 
       // 今回のメッセージIDを保存
       entry.lastIds = sentMessageIds;
