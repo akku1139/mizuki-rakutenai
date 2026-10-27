@@ -81,7 +81,8 @@ docs/             機能ごとの仕様 (ai.md が AI の一次資料)
   60秒超は諦める、quota は再送しない) が効かなくなります。`tests/ratelimit.test.ts` がこれを見ています。
 - **reasoning** は OpenAI 公式のスキーマに無いフィールドです。`reasoning_content` (DeepSeek 系) と
   `reasoning` (OpenRouter) の両方を読み、`reasoning-start` → `reasoning-delta` として流します。
-  返信本文にも会話履歴にも入れません (積み直すとモデル次第でループします)。
+  返信本文には入れませんが、プロバイダが要求する場合は会話履歴の assistant メッセージに
+  `reasoning_content` / `reasoning` として再送します (思考過程が無いターンは空文字)。
 - **会話履歴の不変条件** (`src/ai/openai.ts`): 履歴の先頭は必ず `user` メッセージ。
   ツール呼び出しとその結果の間で切らない。API エラー・ストリーム中断・空応答のときは
   `#historyBeforeTurn` まで巻き戻す。`tests/openai-history.test.ts` が守っています。

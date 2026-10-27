@@ -72,10 +72,12 @@ export class OpenAICompatChat implements ChatSession {
   readonly #config: OpenAICompatConfig;
   readonly #client: OpenAI;
   #systemPrompt: string = '';
-  #history: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+  #history: Array<OpenAI.Chat.ChatCompletionMessageParam & { reasoning?: string }> = [];
   /** 今回の発言を始める前の履歴。失敗や空応答のときはここまで戻す */
-  #historyBeforeTurn: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+  #historyBeforeTurn: Array<OpenAI.Chat.ChatCompletionMessageParam & { reasoning?: string }> = [];
   readonly #tools?: ToolSpec;
+  /** 思考過程を再送するときのフィールド名 (OpenRouter は reasoning、それ以外は reasoning_content) */
+  readonly #reasoningKey: 'reasoning' | 'reasoning_content';
 
   constructor(config: OpenAICompatConfig, tools?: ToolSpec) {
     this.#config = config;
@@ -96,6 +98,11 @@ export class OpenAICompatChat implements ChatSession {
       },
     });
     this.#tools = tools;
+    // OpenRouter は supported_parameters に reasoning を持つ。それ以外 (Command Code / DeepSeek 等) は
+    // reasoning_content を要求するので、ホスト名で切り替える (teapot と同じ方針)。
+    let host = '';
+    try { host = new URL(config.baseUrl).hostname; } catch { host = ''; }
+    this.#reasoningKey = /(^|\.)openrouter\.ai$/i.test(host) ? 'reasoning' : 'reasoning_content';
     this.label = config.model;
   }
 
@@ -106,6 +113,14 @@ export class OpenAICompatChat implements ChatSession {
   /** サーバー/チャンネルの文脈をシステムプロンプトに追記する */
   setServerContext(guildName: string, channelName: string): void {
     this.#systemPrompt += `\nあなたが参加してるサーバーは "${guildName}"、チャンネルは "${channelName}" です。`;
+  }
+
+  /** assistant メッセージの思考過程を、プロバイダが要求するフィールド名で再送する */
+  #withReasoning(m: OpenAI.Chat.ChatCompletionMessageParam): OpenAI.Chat.ChatCompletionMessageParam {
+    if (m.role !== 'assistant') return m;
+    const r = (m as { reasoning?: unknown }).reasoning;
+    const { reasoning: _r, ...rest } = m as unknown as Record<string, unknown>;
+    return { ...rest, [this.#reasoningKey]: typeof r === 'string' ? r : '' } as unknown as OpenAI.Chat.ChatCompletionMessageParam;
   }
 
   async uploadFile(opts: { file: File, isImage?: boolean }): Promise<ChatFile> {
@@ -185,7 +200,7 @@ export class OpenAICompatChat implements ChatSession {
   async *#complete(meta: unknown): AsyncGenerator<AIEvent> {
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       ...(this.#systemPrompt ? [{ role: 'system' as const, content: this.#systemPrompt }] : []),
-      ...this.#history,
+      ...this.#history.map(m => this.#withReasoning(m)),
     ];
 
     let stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk> | undefined;
@@ -219,6 +234,7 @@ export class OpenAICompatChat implements ChatSession {
     let usageEvent: AIEvent | undefined;
     /** reasoning は表示用。履歴には入れない (入れ直すとモデル次第でループする) */
     let sawReasoning = false;
+    let reasoning = '';
 
     try {
       for await (const chunk of stream) {
@@ -227,13 +243,14 @@ export class OpenAICompatChat implements ChatSession {
 
           // reasoning は SDK の型に無いので、互換サーバーの独自フィールドから拾う。
           // ツール呼び出しと同じチャンクに載ることもあるため、先に処理する
-          const reasoning = reasoningText(delta as ReasoningDelta);
-          if (reasoning.length > 0) {
+          const r = reasoningText(delta as ReasoningDelta);
+          if (r.length > 0) {
             if (!sawReasoning) {
               sawReasoning = true;
               yield { type: 'reasoning-start' };
             }
-            yield { type: 'reasoning-delta', text: reasoning };
+            reasoning += r;
+            yield { type: 'reasoning-delta', text: r };
           }
 
           if (Array.isArray(delta.tool_calls)) {
@@ -296,6 +313,7 @@ export class OpenAICompatChat implements ChatSession {
       this.#history.push({
         role: 'assistant',
         content: text || null,
+        reasoning: reasoning || undefined,
         tool_calls: calls.map(c => ({
           id: c.id,
           type: 'function' as const,
@@ -339,9 +357,9 @@ export class OpenAICompatChat implements ChatSession {
     // 通常のテキスト応答: 履歴に追加
     if (finishReason === 'tool_calls') {
       // finish_reasonだけtool_callsで中身が空のケースは、次ラウンドへそのまま渡す
-      this.#history.push({ role: 'assistant', content: null });
+      this.#history.push({ role: 'assistant', content: null, reasoning: reasoning || undefined });
     } else if (text.trim() !== '') {
-      this.#history.push({ role: 'assistant', content: text });
+      this.#history.push({ role: 'assistant', content: text, reasoning: reasoning || undefined });
     } else {
       // 空応答: 履歴を汚さないよう、今回の発言 (ツールの実行結果を含む) ごと戻す
       this.#history = this.#historyBeforeTurn;

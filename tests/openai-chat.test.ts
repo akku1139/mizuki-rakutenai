@@ -121,13 +121,10 @@ test('reasoning on a tool-call round is shown but never replayed into the histor
     { type: 'reasoning-start' },
     { type: 'reasoning-delta', text: 'thinking' },
   ]);
-  // reasoning はリクエストのメッセージにも、返信本文にも混ざらない
-  for (const message of requests[1]!.body.messages) {
-    assert.notEqual((message as { reasoning_content?: unknown }).reasoning_content, 'ツールを使う');
-  }
+  // reasoning は返信本文には混ざらないが、会話履歴にはプロバイダ要求に応じて再送する
   assert.equal(requests[1]!.body.messages[1]!.content, null);
   assert.deepEqual(requests[1]!.body.messages.slice(1), [
-    { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{}' } }] },
+    { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{}' } }], reasoning_content: 'ツールを使う' },
     { role: 'tool', content: '{"found":42}', tool_call_id: 'call_1' },
   ]);
   assert.ok(!events.some(e => e.type === 'text-delta' && /ツールを使う|thinking/.test(e.text)));
@@ -140,7 +137,7 @@ test('the reply is kept in the history for the next turn', async t => {
   await say(chat, 'two');
   assert.deepEqual(requests[1]!.body.messages, [
     { role: 'user', content: 'one' },
-    { role: 'assistant', content: 'first reply' },
+    { role: 'assistant', content: 'first reply', reasoning_content: '' },
     { role: 'user', content: 'two' },
   ]);
   assert.equal(requests[1]!.headers['x-opencode-session'], requests[0]!.headers['x-opencode-session']);
@@ -217,7 +214,7 @@ test('a tool call is assembled from pieces, run without $explain, and answered b
 
   assert.deepEqual(requests[0]!.body.tools, tools.definitions);
   assert.deepEqual(requests[1]!.body.messages.slice(1), [
-    { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{"q":"x","$explain":"searching"}' } }] },
+    { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{"q":"x","$explain":"searching"}' } }], reasoning_content: '' },
     { role: 'tool', content: '{"found":42}', tool_call_id: 'call_1' },
   ]);
 });
