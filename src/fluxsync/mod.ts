@@ -177,8 +177,10 @@ const onDiscordMessageUpdate = async (oldMsg: any, newMsg: any): Promise<void> =
   if (!fluxerId) return;
   const whInfo = whMapDiscord[m.channelId];
   if (!whInfo) return;
+  const targetInfo = whMapFluxer[whInfo.targetChannelID];
+  if (!targetInfo) return;
   try {
-    const res = await fetch(`https://api.fluxer.app/webhooks/${whInfo.whID}/${whInfo.whToken}/messages/${fluxerId}`, {
+    const res = await fetch(`https://api.fluxer.app/webhooks/${targetInfo.whID}/${targetInfo.whToken}/messages/${fluxerId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -200,8 +202,10 @@ const onDiscordMessageDelete = async (m: Message | { id: Snowflake, channelId: S
   if (!fluxerId) return;
   const whInfo = whMapDiscord[m.channelId];
   if (!whInfo) return;
+  const targetInfo = whMapFluxer[whInfo.targetChannelID];
+  if (!targetInfo) return;
   try {
-    const res = await fetch(`https://api.fluxer.app/webhooks/${whInfo.whID}/${whInfo.whToken}/messages/${fluxerId}`, {
+    const res = await fetch(`https://api.fluxer.app/webhooks/${targetInfo.whID}/${targetInfo.whToken}/messages/${fluxerId}`, {
       method: 'DELETE',
     });
     if (!res.ok && res.status !== 204) {
