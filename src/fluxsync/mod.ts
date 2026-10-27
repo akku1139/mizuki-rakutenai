@@ -171,9 +171,93 @@ const bridgeReactions = (from: Client, to: Client, idMap: Map<Snowflake, Snowfla
   from.on('messageReactionRemove', (r, u) => void handle(r, u, true));
 };
 
+const onDiscordMessageUpdate = async (oldMsg: any, newMsg: any): Promise<void> => {
+  const m = newMsg.partial ? await newMsg.fetch().catch(() => newMsg) : newMsg;
+  const fluxerId = dToF.get(m.id);
+  if (!fluxerId) return;
+  const whInfo = whMapDiscord[m.channelId];
+  if (!whInfo) return;
+  try {
+    const res = await fetch(`https://api.fluxer.app/webhooks/${whInfo.whID}/${whInfo.whToken}/messages/${fluxerId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: (m.content ?? '') + stickerLinks(m.stickers),
+        embeds: m.embeds,
+        allowed_mentions: { parse: [] },
+      }),
+    });
+    if (!res.ok) {
+      console.error('fluxer webhook edit error:', res.status, await res.text());
+    }
+  } catch (e) {
+    console.error('failed to edit fluxer webhook message:', e);
+  }
+};
+
+const onDiscordMessageDelete = async (m: Message | { id: Snowflake, channelId: Snowflake }): Promise<void> => {
+  const fluxerId = dToF.get(m.id);
+  if (!fluxerId) return;
+  const whInfo = whMapDiscord[m.channelId];
+  if (!whInfo) return;
+  try {
+    const res = await fetch(`https://api.fluxer.app/webhooks/${whInfo.whID}/${whInfo.whToken}/messages/${fluxerId}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok && res.status !== 204) {
+      console.error('fluxer webhook delete error:', res.status, await res.text());
+    }
+  } catch (e) {
+    console.error('failed to delete fluxer webhook message:', e);
+  } finally {
+    dToF.delete(m.id);
+    fToD.delete(fluxerId);
+  }
+};
+
+const onFluxerMessageUpdate = async (oldMsg: any, newMsg: any): Promise<void> => {
+  const m = newMsg.partial ? await newMsg.fetch().catch(() => newMsg) : newMsg;
+  const discordId = fToD.get(m.id);
+  if (!discordId) return;
+  const whInfo = whMapFluxer[m.channelId];
+  if (!whInfo) return;
+  const targetInfo = whMapDiscord[whInfo.targetChannelID];
+  if (!targetInfo) return;
+  try {
+    await getDiscordWH(targetInfo).editMessage(discordId, {
+      content: (convertEmojis(m.content ?? '', guildOfChannel(discord, whInfo.targetChannelID)) + stickerLinks(m.stickers)).slice(0, 2000),
+      embeds: m.embeds,
+      allowedMentions: { parse: [] },
+    });
+  } catch (e) {
+    console.error('failed to edit discord webhook message:', e);
+  }
+};
+
+const onFluxerMessageDelete = async (m: Message | { id: Snowflake, channelId: Snowflake }): Promise<void> => {
+  const discordId = fToD.get(m.id);
+  if (!discordId) return;
+  const whInfo = whMapFluxer[m.channelId];
+  if (!whInfo) return;
+  const targetInfo = whMapDiscord[whInfo.targetChannelID];
+  if (!targetInfo) return;
+  try {
+    await getDiscordWH(targetInfo).deleteMessage(discordId);
+  } catch (e) {
+    console.error('failed to delete discord webhook message:', e);
+  } finally {
+    fToD.delete(m.id);
+    dToF.delete(discordId);
+  }
+};
+
 export const setupFluxSync = (): void => {
   discord.on('messageCreate', onDiscordMessage);
   fluxer.on('messageCreate', onFluxerMessage);
+  discord.on('messageUpdate', (o, n) => void onDiscordMessageUpdate(o, n));
+  discord.on('messageDelete', m => void onDiscordMessageDelete(m));
+  fluxer.on('messageUpdate', (o, n) => void onFluxerMessageUpdate(o, n));
+  fluxer.on('messageDelete', m => void onFluxerMessageDelete(m));
   bridgeReactions(discord, fluxer, dToF, whMapDiscord);
   bridgeReactions(fluxer, discord, fToD, whMapFluxer);
 };
