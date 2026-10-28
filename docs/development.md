@@ -65,6 +65,7 @@ pnpm typecheck   # tsc --noEmit
 | `tests/openai-tool-history.test.ts` | ツール呼び出しを含む履歴が次のリクエストで通用するか |
 | `tests/openai-compact.test.ts` | トークン数による auto-compact (要約・失敗時の破棄・切れ目・カタログ参照) |
 | `tests/model-meta.test.ts` | モデルカタログ (models.dev とプロバイダの /models) の解決 |
+| `tests/memory.test.ts` | 記憶の保存・重複排除・上限・想起の優先順と文字数・`memory` ツール |
 
 GitHub Actions (`.github/workflows/ci.yml`) で、main への push と PR のたびに両方を実行します。
 

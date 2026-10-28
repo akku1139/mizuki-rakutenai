@@ -18,6 +18,8 @@ import { DISCORD_USER_ID, discord, FLUXER_USER_ID, fluxer } from '../clients.ts'
 import { whMapFluxer } from '../fluxsync/state.ts';
 import { createFileFromUrl, getFileName, isEffectivelyEmpty, splitLongString } from '../utils.ts';
 import { buildContextBlock } from './context.ts';
+import { recall } from '../memory/recall.ts';
+import { loadMemory } from '../memory/store.ts';
 import { embedImageUrls } from './embeds.ts';
 import { OpenAICompatChat } from './openai.ts';
 import { getUserProvider, loadPrefs, setUserProvider } from './prefs.ts';
@@ -267,6 +269,19 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       const replied = await fetchRepliedMessages(m);
       const contextBlock = buildContextBlock(m, sorted, entry.lastIds, rep.length, replied);
 
+      // 覚えていること (ChatGPT の user memory と同じく、検索せず毎ターン常駐させる)
+      let memoryBlock = '';
+      try {
+        memoryBlock = recall({
+          memory: await loadMemory(m.guild.id),
+          userId: m.author.id,
+          text: [m.content, ...replied.map(r => r.content)].join('\n'),
+        }).text;
+      } catch (e) {
+        // 記憶が読めなくても会話は止めない
+        error('memory recall failed:', e);
+      }
+
       const attachmentFiles = await Promise.all(withSnapshots(m).flatMap(s => [...s.attachments.values()]).map(async f => {
         log('file:', f.url, f.name);
         const file = await createFileFromUrl(f.proxyURL, f.name);
@@ -294,7 +309,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       }));
       const files = [...attachmentFiles, ...extraFiles.filter(f => f !== undefined)];
 
-      const input = rep + contextBlock;
+      const input = rep + memoryBlock + (memoryBlock === '' ? '' : '\n') + contextBlock;
 
       log(m.id, `[${chat.label}]`, input);
 

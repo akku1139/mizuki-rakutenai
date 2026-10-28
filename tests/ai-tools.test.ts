@@ -49,7 +49,7 @@ const meta = (channel: object, client: object = { channels: { fetch: async () =>
 test('every tool gets a required $explain argument in its OpenAI definition', () => {
   const defs = toOpenAITools() as Array<{ function: { name: string, parameters: { properties: object, required: string[] } } }>;
   assert.deepEqual(defs.map(d => d.function.name), [
-    'fetch_message', 'fetch_messages_history', 'search_messages', 'wikipedia_search', 'wikipedia_read', 'read_web', 'search_web',
+    'memory', 'fetch_message', 'fetch_messages_history', 'search_messages', 'wikipedia_search', 'wikipedia_read', 'read_web', 'search_web',
   ]);
   for (const d of defs) {
     assert.ok('$explain' in d.function.parameters.properties, d.function.name);

@@ -15,6 +15,7 @@ import process from 'node:process';
 import { discord, fluxer } from '../clients.ts';
 import { callMcpTool, getMcpTools } from './mcp-registry.ts';
 import { flattenToolName } from './mcp.ts';
+import { memoryTool } from '../memory/tools.ts';
 import { config, get } from '../config.ts';
 import { describeEmbed, describeMessage } from './embeds.ts';
 import type { ToolSpec } from './types.ts';
@@ -473,6 +474,7 @@ const searchWeb: AITool = {
 
 /** 利用可能なツール一覧。エンドポイント系は環境変数が設定されている場合のみ含める */
 export let aitools: Record<string, AITool> = {
+  memory: memoryTool,
   fetch_message: fetchMessage,
   fetch_messages_history: fetchMessagesHistory,
   search_messages: searchMessages,
