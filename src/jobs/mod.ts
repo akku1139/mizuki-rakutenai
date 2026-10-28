@@ -5,6 +5,8 @@
 import { log, error } from '../log.ts';
 import { discord, fluxer } from '../clients.ts';
 import { config, get } from '../config.ts';
+import { createChatSession } from '../ai/mod.ts';
+import { getAitoolsSpec } from '../ai/tools.ts';
 
 export interface Job {
   id: string,
@@ -69,10 +71,7 @@ const runAgentJob = async (job: Job, prompt: string): Promise<void> => {
   job.startedAt = Date.now();
   log(`job ${job.id}: agent start`);
   try {
-    const { createChatSession } = await import('../ai/mod.ts');
     const chat = await createChatSession('openai');
-    const { getAitoolsSpec } = await import('../ai/tools.ts');
-    // tools are already in session via createChatSession; nothing else
     let text = '';
     for await (const ev of chat.sendMessage({ contents: [{ type: 'text', text: prompt }] })) {
       if (ev.type === 'text-delta') text += ev.text;
