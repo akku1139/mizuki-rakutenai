@@ -126,7 +126,7 @@ const newEntry = async (
   provider: ProviderName,
   m: OmitPartialGroupDMChannel<Message<boolean>>,
 ): Promise<{ entry: ChatEntry, rep: string }> => {
-  const rep = await buildSystemPrompt(m.guild);
+  const rep = await buildSystemPrompt(m.guild, provider);
   const t = await createChatSession(provider, {
     guildName: m.guild?.name,
     channelName: m.channel.isDMBased() ? undefined : m.channel.name,

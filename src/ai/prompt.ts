@@ -7,8 +7,9 @@ import type { Guild } from 'discord.js';
 import { DISCORD_USER_ID, FLUXER_USER_ID } from '../clients.ts';
 import { getMcpTools, getMcpStatus } from './mcp-registry.ts';
 
-export const buildSystemPrompt = async (guild?: Guild | null): Promise<string> => {
-  const mcpTools = getMcpTools();
+export const buildSystemPrompt = async (guild?: Guild | null, provider?: string): Promise<string> => {
+  const includeMcp = provider !== 'rakutenai';
+  const mcpTools = includeMcp ? getMcpTools() : [];
   const mcpSection = mcpTools.length > 0
     ? mcpTools.length > 20
       ? `===== MCP ツール =====
