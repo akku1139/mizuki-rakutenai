@@ -355,8 +355,25 @@ export let aitools: Record<string, AITool> = {
 };
 
 /** OpenAI function calling 形式のツール定義に変換する ($explain を自動追加) */
+export const getAllAitools = (): Record<string, AITool> => {
+  const out: Record<string, AITool> = { ...aitools };
+  for (const t of getMcpTools()) {
+    const flat = flattenToolName(t.server, t.name);
+    out[flat] = {
+      description: t.description,
+      parametersJsonSchema: t.inputSchema,
+      async execute(args) {
+        const r = await callMcpTool(flat, args);
+        if (r === null) return [false, { error: 'mcp tool not found' }];
+        return [r.ok, r.text] as AIToolResult;
+      },
+    };
+  }
+  return out;
+};
+
 export const toOpenAITools = (): Array<Record<string, unknown>> =>
-  Object.entries(aitools).map(([name, t]) => {
+  Object.entries(getAllAitools()).map(([name, t]) => {
     const p = t.parametersJsonSchema as {
       properties?: Record<string, unknown>,
       required?: ReadonlyArray<string>,
@@ -392,7 +409,7 @@ export const executeAITool = async (
   args: Record<string, unknown>,
   meta: AIToolMeta,
 ): Promise<AIToolResult> => {
-  const tool = aitools[name];
+  const tool = getAllAitools()[name];
   if (!tool) return [false, { error: `function: ${name} は存在しません` }];
   log('tool call:', name, ':', args);
   return tool.execute(args, meta);
