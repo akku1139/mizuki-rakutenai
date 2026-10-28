@@ -5,6 +5,7 @@ import { log, info, warn, error } from '../log.ts';
 /// akku1139/evex-quotes の src/aitools を移植し、OpenAIのfunction calling形式で使えるようにしたもの。
 /// RakutenAIはサーバー側ツールのみ使えるため、このツール群は渡さない。
 
+import { SnowflakeUtil } from 'discord.js';
 import {
   type Client,
   type MessageManager,
@@ -15,6 +16,7 @@ import process from 'node:process';
 import { discord, fluxer } from '../clients.ts';
 import { callMcpTool, getMcpTools } from './mcp-registry.ts';
 import { flattenToolName } from './mcp.ts';
+import { describeQuery, matchesQuery, parseSearchQuery, type SearchQuery } from './search-query.ts';
 import { memoryTool } from '../memory/tools.ts';
 import { config, get } from '../config.ts';
 import { describeEmbed, describeMessage } from './embeds.ts';
@@ -131,76 +133,345 @@ const fetchMessage: AITool = {
   },
 };
 
-/// search_messages: サーバー内のメッセージを検索 (ブラックリストチャンネルは除外)
+/// search_messages: サーバー内のメッセージを検索する。
+/// Discord の検索 API は bot に開放されていないので、対象チャンネルを遡って取得し、
+/// `search-query.ts` が解釈した条件で自前で絞る。
+
+/** 1 回の検索で見るメッセージ数の既定と上限 */
+const SEARCH_SCAN_DEFAULT = 1_000;
+const SEARCH_SCAN_MAX = 5_000;
+/** 1 リクエストで取る件数 (Discord の上限) */
+const SEARCH_PAGE = 100;
+/** 一度に遡るチャンネルの上限 (`all` のとき) */
+const SEARCH_MAX_CHANNELS = 12;
+
+interface SearchTarget {
+  id: string;
+  name: string;
+  messages: { fetch(options: Record<string, unknown>): Promise<Map<string, any>> };
+}
+
+const textChannelsOf = (guild: any, blacklist: readonly string[]): SearchTarget[] => {
+  const blocked = (id: string, parentId?: string | null): boolean =>
+    blacklist.includes(id) || (parentId !== undefined && parentId !== null && blacklist.includes(parentId));
+  const out: SearchTarget[] = [];
+  for (const ch of guild.channels?.cache?.values?.() ?? []) {
+    if (typeof ch?.isTextBased === 'function' && !ch.isTextBased()) continue;
+    if (blocked(ch.id, ch.parentId)) continue;
+    out.push({ id: ch.id, name: ch.name ?? ch.id, messages: ch.messages });
+  }
+  for (const t of guild.threads?.cache?.values?.() ?? []) {
+    if (blocked(t.id, t.parentId)) continue;
+    out.push({ id: t.id, name: `#${t.parent?.name ?? '?'} / ${t.name}`, messages: t.messages });
+  }
+  return out;
+};
+
+/** `in:` の値 (チャンネル ID / #名前 / メッセージやチャンネルの URL) を対象に解決する */
+const resolveTargets = (values: readonly string[], guild: any, fallback: SearchTarget): { targets: SearchTarget[], missing: string[] } => {
+  if (values.length === 0) return { targets: [fallback], missing: [] };
+  const known = textChannelsOf(guild, []);
+  const byId = new Map(known.map(t => [t.id, t]));
+  const byName = new Map<string, SearchTarget[]>();
+  for (const t of known) {
+    const name = t.name.replace(/^#/, '').toLowerCase();
+    byName.set(name, [...(byName.get(name) ?? []), t]);
+  }
+  const targets: SearchTarget[] = [];
+  const missing: string[] = [];
+  for (const raw of values) {
+    const value = raw.replace(/[<>]/g, '').trim();
+    if (value === '' ) continue;
+    const url = /channels\/\d+\/(\d+)/.exec(value);
+    const id = url?.[1] ?? (/^\d{5,}$/.test(value) ? value : undefined);
+    if (id !== undefined) {
+      const hit = byId.get(id);
+      if (hit !== undefined) { if (!targets.includes(hit)) targets.push(hit); }
+      else missing.push(raw);
+      continue;
+    }
+    const name = value.replace(/^#/, '').toLowerCase();
+    const hits = byName.get(name) ?? [];
+    for (const hit of hits) if (!targets.includes(hit)) targets.push(hit);
+    if (hits.length === 0) missing.push(raw);
+  }
+  return { targets, missing };
+};
+
+/** 1 チャンネルを遡り、条件に合うものを集める */
+const searchChannel = async (
+  target: SearchTarget,
+  query: SearchQuery,
+  need: number,
+  budget: number,
+): Promise<{ hits: any[], scanned: number }> => {
+  const hits: any[] = [];
+  let scanned = 0;
+  let before: string | undefined;
+  // after があれば、そこより古くなったら止める (取得自体も after で絞る)
+  const afterId = query.after !== undefined ? SnowflakeUtil.generate({ timestamp: query.after }).toString() : undefined;
+
+  while (scanned < budget && hits.length < need) {
+    const limit = Math.min(SEARCH_PAGE, budget - scanned);
+    let batch: Map<string, any>;
+    try {
+      batch = await target.messages.fetch({
+        limit,
+        ...(before !== undefined ? { before } : {}),
+        ...(afterId !== undefined ? { after: afterId } : {}),
+      });
+    } catch {
+      break; // 読めないチャンネルは飛ばす
+    }
+    if (batch.size === 0) break;
+    let oldest = Number.MAX_SAFE_INTEGER;
+    for (const m of batch.values()) {
+      scanned++;
+      if (typeof m?.createdTimestamp === 'number' && m.createdTimestamp < oldest) oldest = m.createdTimestamp;
+      if (matchesQuery(m, query)) hits.push(m);
+      if (hits.length >= need) break;
+    }
+    if (batch.size < limit) break; // これ以上古いものが無い
+    if (query.after !== undefined && oldest < query.after) break;
+    const oldestId = [...batch.keys()].reduce((a, b) => (BigInt(a) < BigInt(b) ? a : b));
+    if (oldestId === before) break;
+    before = oldestId;
+  }
+  return { hits, scanned };
+};
+
+/** 検索で使える has: の値 (公式検索の has に対応) */
+const SEARCH_HAS_TYPES = new Set(['image', 'sound', 'video', 'file', 'sticker', 'embed', 'link', 'poll', 'snapshot']);
+
+interface OfficialSearchResult {
+  messages: any[];
+  total: number;
+}
+
+/**
+ * 公式の検索 (GET /guilds/{id}/messages/search)。
+ * bot からも使える (要 READ_MESSAGE_HISTORY、MESSAGE_CONTENT intent の制限は受ける)。
+ * 索引がまだ無いときは 202 と `retry_after` が返るので、指定された分だけ待って 1 回だけやり直す。
+ */
+const searchViaApi = async (
+  msg: OmitPartialGroupDMChannel<Message<boolean>>,
+  query: SearchQuery,
+  channelIds: string[],
+  limit: number,
+): Promise<OfficialSearchResult> => {
+  const client = msg.client;
+  const guild = msg.guild!;
+  const members = guild.members;
+
+  // from: はユーザー ID でも名前でも書ける。名前はメンバーから引く
+  const authorIds: string[] = [];
+  const unresolvedFrom: string[] = [];
+  for (const from of query.from) {
+    if (/^\d{5,}$/.test(from) || /^\d+$/.test(from)) { authorIds.push(from); continue; }
+    const nameMatches = (m: { user: { username: string, globalName: string | null }, displayName: string }) =>
+      m.user.username.toLowerCase().includes(from)
+      || (m.user.globalName ?? '').toLowerCase().includes(from)
+      || m.displayName.toLowerCase().includes(from);
+    const cached = [...members.cache.values()].find(nameMatches);
+    if (cached !== undefined) { authorIds.push(cached.id); continue; }
+      // キャッシュに無い名前はサーバーに問い合わせる
+    try {
+      const found = await members.fetch({ query: from, limit: 5 });
+      const hit = [...found.values()].find(nameMatches);
+      if (hit !== undefined) authorIds.push(hit.id);
+      else unresolvedFrom.push(from);
+    } catch {
+      unresolvedFrom.push(from);
+    }
+  }
+
+  const base: Record<string, unknown> = {
+    content: [...query.terms, ...query.phrases.map(p => `"${p}"`), ...query.anyOf].join(' ').trim() || undefined,
+    channel_id: channelIds.length > 0 ? channelIds : [msg.channelId],
+    ...(authorIds.length > 0 ? { author_id: authorIds } : {}),
+    ...(query.mentions.length > 0 ? { mentions: query.mentions } : {}),
+    ...(query.pinned === true ? { pinned: true } : {}),
+    ...(query.has.length > 0 ? { has: query.has.filter(h => SEARCH_HAS_TYPES.has(h)) } : {}),
+    ...(query.after !== undefined ? { min_id: SnowflakeUtil.generate({ timestamp: query.after }).toString() } : {}),
+    ...(query.before !== undefined ? { max_id: SnowflakeUtil.generate({ timestamp: query.before }).toString() } : {}),
+    sort_by: 'timestamp',
+    sort_order: query.sort === 'old' ? 'asc' : 'desc',
+    include_nsfw: ('nsfw' in msg.channel ? Boolean((msg.channel as { nsfw?: boolean }).nsfw) : false),
+  };
+
+  const collected: any[] = [];
+  let total = 0;
+  let offset = 0;
+  let retried = false;
+  while (collected.length < limit && offset <= 9_975) {
+    const page = await client.rest.get(`/guilds/${guild.id}/messages/search`, {
+      query: new URLSearchParams(
+        Object.entries({ ...base, limit: Math.min(25, limit - collected.length), offset })
+          .filter(([, v]) => v !== undefined && !(Array.isArray(v) && v.length === 0))
+          .flatMap(([k, v]) => (Array.isArray(v) ? v.map(item => [k, String(item)]) : [[k, String(v)]])) as Array<[string, string]>,
+      ),
+    }) as { messages?: any[][], total_results?: number, code?: number, retry_after?: number };
+
+    // 索引がまだ無い (202)
+    if (page?.code === 11_0000 || (page?.retry_after !== undefined && page?.messages === undefined)) {
+      if (retried) throw new Error('検索の索引がまだ準備できていません。少し待ってからもう一度試してください');
+      retried = true;
+      const wait = Math.min(Math.max(Number(page.retry_after ?? 1), 0), 5) * 1000;
+      await new Promise(resolve => setTimeout(resolve, wait));
+      continue;
+    }
+    const rows = (page?.messages ?? []).flat();
+    total = Number(page?.total_results ?? rows.length);
+    if (rows.length === 0) break;
+    for (const m of rows) if (!collected.some(c => c.id === m.id)) collected.push(m);
+    if (rows.length < 25) break;
+    offset += rows.length;
+  }
+  if (unresolvedFrom.length > 0) {
+    log(`search: from:${unresolvedFrom.join(',')} に当たるメンバーが見つからないので条件から外しました`);
+  }
+  return { messages: collected, total };
+};
+
+/** 公式検索の生メッセージを、自前の判定 (`matchesQuery`) が読める形に均す */
+const normalizeApiMessage = (m: any): any => {
+  const at = Date.parse(String(m?.timestamp ?? ''));
+  return {
+    id: m?.id,
+    url: typeof m?.id === 'string' && typeof m?.channel_id === 'string'
+      ? `https://discord.com/channels/${m.guild_id ?? '@me'}/${m.channel_id}/${m.id}`
+      : undefined,
+    channel_id: m?.channel_id,
+    content: typeof m?.content === 'string' ? m.content : '',
+    createdTimestamp: Number.isNaN(at) ? 0 : at,
+    pinned: m?.pinned === true,
+    author: {
+      id: m?.author?.id,
+      username: m?.author?.username,
+      globalName: m?.author?.global_name ?? null,
+      displayName: m?.member?.nick ?? m?.author?.global_name ?? null,
+    },
+    mentions: { users: { has: (id: string) => Array.isArray(m?.mentions) && m.mentions.some((u: { id?: string }) => u?.id === id) } },
+    embeds: Array.isArray(m?.embeds) ? m.embeds : [],
+    attachments: {
+      size: Array.isArray(m?.attachments) ? m.attachments.length : 0,
+      values: () => (Array.isArray(m?.attachments) ? m.attachments : []).map((a: any) => ({
+        contentType: a?.content_type ?? null,
+        name: a?.filename,
+        url: a?.url,
+      }))[Symbol.iterator](),
+    },
+    stickers: { size: Array.isArray(m?.sticker_items) ? m.sticker_items.length : 0 },
+    poll: m?.poll,
+    reactions: { cache: { size: Array.isArray(m?.reactions) ? m.reactions.length : 0 } },
+  };
+};
 
 const searchMessages: AITool = {
-  description: '現在のサーバー内のテキストチャンネル/スレッドを横断してメッセージを検索します。ブラックリストのチャンネルは結果に含まれません。',
+  description: 'サーバー内のメッセージを、Discord の検索と同じ書き方で探す (Discord の検索 API を使う)。'
+    + 'query に語と条件をまとめて書ける (例: `from:たこ has:image after:2026-10-01 "デプロイ 失敗" -warn`)。'
+    + '使える条件: from: (ユーザー名/ID) in: (#チャンネル名/ID/URL) mentions: (ユーザーID) has: (link/embed/image/file/sticker/poll/reaction) '
+    + 'before: after: during: (2026-10-01 / 2026-10 / 7d / 24h) is:pinned len:>100 len:<50 regex:/…/i sort:old。'
+    + '`OR` でどちらか、先頭に - で除外、"" でフレーズ。既定は現在のチャンネルだけを新しい順に見る。'
+    + 'サーバー全体を見るときは channels: "all"。',
   parametersJsonSchema: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: '検索クエリ (部分一致)' },
-      limit: { type: 'number', description: '最大件数 (既定 20, 最大 50)' },
+      query: { type: 'string', description: '検索語と条件 (上記の書き方)' },
+      channels: { type: 'string', description: '対象チャンネル (#名前 / ID / URL をカンマ区切り)。"all" でサーバー全体。省略時は現在のチャンネル' },
+      limit: { type: 'number', description: '返す最大件数 (既定 20, 最大 50)' },
+      scan: { type: 'number', description: '何件まで遡って調べるか (既定 1000, 最大 5000)。結果が少ないときは増やす' },
     },
-    required: ['query'],
   },
-  async execute({ query, limit }, { msg }) {
+  async execute({ query: rawQuery, channels, limit, scan }, { msg }) {
     try {
       if (!msg.guild) return [false, { error: 'サーバー内でのみ使用できます' }];
-      const q = String(query ?? '').toLowerCase();
-      if (!q) return [false, { error: 'query は必須です' }];
-      const lim = typeof limit === 'number' ? Math.min(Math.max(Math.trunc(limit), 1), 50) : 20;
-      const black = config.blacklistedChannels ?? [];
-      const isBlacklisted = (id: string, parentId?: string | null) =>
-        black.includes(id) || (!!parentId && black.includes(parentId));
-      const results: Array<Record<string, unknown>> = [];
-      for (const ch of msg.guild.channels.cache.values()) {
-        if (!ch.isTextBased()) continue;
-        if (isBlacklisted(ch.id, (ch as { parentId?: string | null }).parentId)) continue;
-        try {
-          const msgs = await (ch as any).messages.fetch({ limit: 50 });
-          for (const m of msgs.values()) {
-            if (typeof m.content === 'string' && m.content.toLowerCase().includes(q)) {
-              results.push({
-                id: m.id,
-                channelId: ch.id,
-                channelName: (ch as any).name,
-                author: m.author?.username ?? m.author?.displayName,
-                authorId: m.author?.id,
-                content: m.content.slice(0, 300),
-                url: m.url,
-              });
-              if (results.length >= lim) break;
-            }
-          }
-        } catch {
-          // 取得できないチャンネルはスキップ
-        }
-        if (results.length >= lim) break;
+      const query = parseSearchQuery(typeof rawQuery === 'string' ? rawQuery : '');
+      const blacklist = config.blacklistedChannels ?? [];
+      const limits = typeof limit === 'number' ? Math.min(Math.max(Math.trunc(limit), 1), 50) : 20;
+      const budgetTotal = typeof scan === 'number'
+        ? Math.min(Math.max(Math.trunc(scan), 50), SEARCH_SCAN_MAX)
+        : SEARCH_SCAN_DEFAULT;
+
+      const current: SearchTarget = {
+        id: msg.channel.id,
+        name: 'name' in msg.channel ? `#${(msg.channel as { name: string }).name}` : msg.channel.id,
+        messages: (msg.channel as unknown as SearchTarget).messages,
+      };
+
+      // 対象チャンネル: channels 引数 > in: > 現在のチャンネル
+      const requested = [
+        ...(typeof channels === 'string' && channels.trim() !== '' ? channels.split(/[,、\s]+/).filter(Boolean) : []),
+        ...query.channels,
+      ];
+      let targets: SearchTarget[];
+      let missing: string[] = [];
+      if (requested.some(v => v.toLowerCase() === 'all')) {
+        targets = textChannelsOf(msg.guild, blacklist).slice(0, SEARCH_MAX_CHANNELS);
+      } else {
+        const resolved = resolveTargets(requested, msg.guild, current);
+        targets = resolved.targets;
+        missing = resolved.missing;
       }
-      // スレッドも検索
-      for (const t of (msg.guild as any).threads?.cache?.values?.() ?? []) {
-        if (results.length >= lim) break;
-        if (isBlacklisted(t.id, t.parentId)) continue;
-        try {
-          const msgs = await t.messages.fetch({ limit: 50 });
-          for (const m of msgs.values()) {
-            if (typeof m.content === 'string' && m.content.toLowerCase().includes(q)) {
-              results.push({
-                id: m.id,
-                channelId: t.id,
-                channelName: `#${t.parent?.name ?? '?'} / ${t.name}`,
-                author: m.author?.username ?? m.author?.displayName,
-                authorId: m.author?.id,
-                content: m.content.slice(0, 300),
-                url: m.url,
-              });
-              if (results.length >= lim) break;
-            }
-          }
-        } catch {
+      targets = targets.filter(t => !blacklist.includes(t.id));
+      if (targets.length === 0) return [false, { error: `対象のチャンネルが見つかりません: ${missing.join(', ') || 'なし'}` }];
+
+      // まず公式の検索 API。使えないとき (権限不足・Fluxer・索引なし) だけ自前で遡る
+      let collected: Array<{ message: any, target: SearchTarget }> = [];
+      let scanned = 0;
+      let via: 'api' | 'paging' = 'api';
+      try {
+        const result = await searchViaApi(msg, query, targets.map(t => t.id), limits);
+        const byId = new Map(targets.map(t => [t.id, t]));
+        for (const raw of result.messages) {
+          const message = normalizeApiMessage(raw);
+          if (!matchesQuery(message, query)) continue;
+          const target = byId.get(String(message.channel_id)) ?? targets[0]!;
+          collected.push({ message, target });
+        }
+      } catch (e) {
+        via = 'paging';
+        log('search: 公式検索が使えないので自前で遡ります:', e instanceof Error ? e.message : e);
+        const perChannel = Math.max(50, Math.floor(budgetTotal / targets.length));
+        for (const target of targets) {
+          const result = await searchChannel(target, query, limits - collected.length, perChannel);
+          scanned += result.scanned;
+          for (const message of result.hits) collected.push({ message, target });
+          if (collected.length >= limits) break;
         }
       }
-      return [true, { count: results.length, messages: results }];
+
+      collected.sort((a, b) => query.sort === 'old'
+        ? (a.message.createdTimestamp ?? 0) - (b.message.createdTimestamp ?? 0)
+        : (b.message.createdTimestamp ?? 0) - (a.message.createdTimestamp ?? 0));
+
+      const messages = collected.slice(0, limits).map(({ message, target }) => ({
+        id: message.id,
+        url: message.url ?? `https://discord.com/channels/${msg.guild!.id}/${message.channel_id ?? target.id}/${message.id}`,
+        channelId: message.channel_id ?? target.id,
+        channelName: target.name,
+        author: message.author?.username ?? message.author?.global_name ?? '?',
+        authorId: message.author?.id,
+        at: (message.createdTimestamp ?? 0) > 0 ? new Date(message.createdTimestamp).toISOString() : undefined,
+        content: typeof message.content === 'string' ? message.content.slice(0, 400) : '',
+        ...(message.attachments !== undefined && (message.attachments.size ?? 0) > 0
+          ? { attachments: [...message.attachments.values()].slice(0, 5).map((a: { name?: string, url?: string }) => a.name ?? a.url) }
+          : {}),
+      }));
+
+      return [true, {
+        query: describeQuery(query),
+        via,
+        ...(query.ignored.length > 0 ? { ignoredOperators: query.ignored } : {}),
+        ...(missing.length > 0 ? { unknownChannels: missing } : {}),
+        channelsSearched: targets.map(t => t.name),
+        ...(via === 'paging' ? { scanned } : {}),
+        count: messages.length,
+        ...(messages.length === 0
+          ? { hint: '条件を緩めるか、期間 (after:) を広げてください。サーバー全体を見るには channels: "all"' }
+          : {}),
+        messages,
+      }];
     } catch (err) {
       return [false, errText(err)];
     }
@@ -311,7 +582,6 @@ const fetchMessagesHistory: AITool = {
   },
 };
 
-/// wikipedia_search: Wikipedia記事を検索
 
 const wikipediaSearch: AITool = {
   description: 'Wikipediaを検索します',

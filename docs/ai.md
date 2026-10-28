@@ -240,6 +240,7 @@ API が 400 を返してそのセッションは捨てられます** (小さい�
 |---|---|---|
 | `fetch_message` | Discord / Fluxer のメッセージ URL から1件取得 | 常に |
 | `fetch_messages_history` | メッセージ URL かチャンネルメンションを起点に、前後の履歴を取得 (既定30件、最大100件、`after` / `before` / `around`) | 常に |
+| `search_messages` | サーバー内のメッセージ検索。Discord の検索構文を受け付ける (下記) | 常に |
 | `wikipedia_search` | 日本語版 Wikipedia を検索 | 常に |
 | `wikipedia_read` | 日本語版 Wikipedia の記事本文を取得 | 常に |
 | `read_web` | `GET ${READABILITY_ENDPOINT}?url=<URL>` で Web ページを読む | `READABILITY_ENDPOINT` を設定 |
@@ -249,6 +250,36 @@ API が 400 を返してそのセッションは捨てられます** (小さい�
 
 ツールの実行とモデルの再生成に回数上限は設けていません。モデルがツール呼び出しを返し続ける限りループします。
 1回の API リクエストのタイムアウトは120秒です。
+
+## メッセージ検索 (`search_messages`)
+
+Discord の検索 API (`GET /guilds/{id}/messages/search`) を使います。**bot からも使えます**が、
+`READ_MESSAGE_HISTORY` 権限と `MESSAGE_CONTENT` privileged intent が要ります。
+索引がまだ無いサーバーでは `202` と `retry_after` が返るので、少し待って 1 回だけやり直します。
+
+使えないとき (権限不足、Fluxer、索引が用意できない) は、チャンネルを遡って自前で絞ります。
+そのときだけ `scan` (何件まで遡るか、既定 1,000・最大 5,000) が効きます。
+
+検索語は Discord の書き方 + 少し足したものです。
+
+| 書き方 | 内容 |
+|---|---|
+| `語` `"フレーズ"` | すべて含む (AND)。`""` は空白込み |
+| `語 OR 語` | どちらか |
+| `-語` | 含まない |
+| `from:名前/ID` | 投稿者。名前はメンバーから引く (キャッシュに無ければ問い合わせ) |
+| `in:#チャンネル` / `in:ID` / `in:URL` | 対象チャンネル。`channels: "all"` でサーバー全体 (最大12チャンネル) |
+| `mentions:ユーザーID` / `mentions:ロールID` | メンション先 |
+| `has:image` `has:file` `has:link` `has:embed` `has:sticker` `has:poll` `has:video` `has:sound` | 添付・埋め込みの種類 |
+| `before:2026-10-01` `after:7d` `during:week` `on:2026-10` | 期間。絶対 (日付・月・年) と相対 (`24h` `7d` `2w`) |
+| `is:pinned` / `pinned:true` | ピン留め |
+| `len:>100` `len:<50` | 本文の長さ |
+| `regex:/…/i` | 正規表現 |
+| `sort:old` | 古い順 (既定は新しい順) |
+
+Discord 側が解釈できる条件 (`content` / `channel_id` / `author_id` / `mentions` / `has` / `pinned` /
+`min_id` / `max_id` / `sort`) は API に渡し、`regex`・`len`・`-語`・`OR` のような API が知らない条件は
+返ってきたメッセージに対してかけます。解釈できなかった演算子は `ignoredOperators` として結果に添えます。
 
 ## HTTP 429 対策 (openai のみ)
 
