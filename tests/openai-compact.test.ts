@@ -325,3 +325,41 @@ test('削っても収まらないときは、保護範囲も削ってから要�
   const largest = Math.max(...bodies.filter(b => b.stream !== false).map(b => JSON.stringify(b.messages).length));
   assert.ok(largest < 100_000, `履歴が伸び続けている: ${largest} 文字`);
 });
+
+test('要約できないときは、古い方から全体の 1/3 を捨てる (全部は消さない)', async t => {
+  resetModelMetaCache();
+  const requests: Body[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string, init?: RequestInit) => {
+    const target = String(url);
+    if (target === 'https://models.dev/api.json') return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    if (target.endsWith('/models')) return new Response('nope', { status: 404 });
+    const body = JSON.parse(String(init!.body)) as Body;
+    requests.push(body);
+    if (body.stream === false) return new Response('boom', { status: 500 }); // 要約は必ず失敗
+    return stream('ok');
+  });
+  const chat = new OpenAICompatChat({ baseUrl: 'https://llm.invalid/v1', apiKey: 'k', model: 'm', contextWindowTokens: 10_000 });
+
+  // 1 通 ≒ 600 トークン。予算 7,500 なので 13 往復目で超える
+  for (let i = 0; i < 16; i++) {
+    for await (const _event of chat.sendMessage({ contents: [{ type: 'text', text: `m${i} ` + 'あ'.repeat(500) }] })) { /* drain */ }
+  }
+
+  const dropped = requests.filter(b => JSON.stringify(b.messages).includes('破棄されました'));
+  assert.ok(dropped.length > 0, '破棄して縮めていない');
+  const userLines = dropped[0]!.messages.filter(m => typeof m.content === 'string' && /^m\d+ /.test(m.content));
+  assert.ok(userLines.length > 4, `捨てすぎている: ${userLines.length} 件しか残っていない`);
+  // 捨てた直後も、直近の会話は続いている (全部消して作り直しにはしない)
+  const last = requests.at(-1)!;
+  assert.ok(last.messages.some(m => String(m.content).startsWith('m15 ')), '直近が消えている');
+  assert.ok(!last.messages.some(m => String(m.content).startsWith('m0 ')), '最も古いものが残っている');
+  const kept = last.messages.filter(m => typeof m.content === 'string' && /^m\d+ /.test(m.content));
+  assert.ok(kept.length >= 4, `残りすぎ/捨てすぎ: ${kept.length} 件`);
+  // tool 呼び出しの対応は割らない
+  for (const message of last.messages) {
+    if (message.role !== 'assistant' || !message.tool_calls?.length) continue;
+    for (const call of message.tool_calls) {
+      assert.ok(last.messages.some(m => m.role === 'tool' && m.tool_call_id === call.id));
+    }
+  }
+});

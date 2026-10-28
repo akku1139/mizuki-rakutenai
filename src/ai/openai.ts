@@ -41,6 +41,12 @@ const PRUNE_AT_SHARE = 0.95;
 const PRUNE_MIN_CHARS = 3_000;
 /** 削るときに残す先頭の文字数 */
 const PRUNE_KEEP_CHARS = 400;
+/**
+ * 要約できないときの最後の手段で、古い方から捨てる割合 (全体のトークンに対する)。
+ * 予算は窓の 75% なので、1/3 捨てれば必ず予算の下に戻る (2/3 = 67% < 75%)。
+ * 一度に全部捨てず、足りなければまた 1/3 ずつ捨てる。
+ */
+const DROP_SHARE = 1 / 3;
 /** 出力が長いだけで、消しても会話が続くツール (teapot の `PRUNABLE_TOOLS` の mizuki 版) */
 const PRUNABLE_TOOLS = new Set([
   'fetch_message', 'fetch_messages_history', 'search_messages',
@@ -124,6 +130,13 @@ export class OpenAICompatChat implements ChatSession {
   #catalogWindowTokens: Promise<number | undefined> | undefined;
   /** 直近に使ったウィンドウの出どころ (変わったときだけログに出す) */
   #windowSource: 'config' | 'catalog' | 'default' | undefined;
+  /**
+   * このセッションでモデルが思考過程を返したか。
+   * 思考過程を返すモデルには、ツール呼び出しを含む assistant メッセージに
+   * `reasoning_content` を必須にするものがあるので、一度でも返したら
+   * ツール呼び出しの直前には (空でも) 必ず付ける。
+   */
+  #modelReasons = false;
 
   constructor(config: OpenAICompatConfig, tools?: ToolSpec) {
     this.#config = config;
@@ -165,15 +178,22 @@ export class OpenAICompatChat implements ChatSession {
 
   /**
    * assistant メッセージの思考過程を、プロバイダが要求するフィールド名で再送する。
-   * 思考過程が無かったターンはフィールドごと省く (空文字を送ると、そのフィールドを
-   * 知らないプロバイダ (OpenAI 公式など) では未知の引数として 400 になる)。
+   *
+   * - 思考過程があるターンは、そのまま再送する
+   * - ツール呼び出しを含むメッセージは、思考過程を返すモデルなら空でも必ず付ける
+   *   (直前の思考を要求するプロバイダがある)。思考過程を一度も返さないモデルには
+   *   付けない (そのフィールドを知らないプロバイダでは未知の引数として 400 になる)
    */
   #withReasoning(m: OpenAI.Chat.ChatCompletionMessageParam): OpenAI.Chat.ChatCompletionMessageParam {
     if (m.role !== 'assistant') return m;
     const r = (m as { reasoning?: unknown }).reasoning;
     const { reasoning: _r, ...rest } = m as unknown as Record<string, unknown>;
-    if (typeof r !== 'string' || r === '') return rest as unknown as OpenAI.Chat.ChatCompletionMessageParam;
-    return { ...rest, [this.#reasoningKey]: r } as unknown as OpenAI.Chat.ChatCompletionMessageParam;
+    const reasoning = typeof r === 'string' ? r : '';
+    const hasToolCalls = ((m as { tool_calls?: unknown[] }).tool_calls?.length ?? 0) > 0;
+    if (reasoning === '' && !(hasToolCalls && this.#modelReasons)) {
+      return rest as unknown as OpenAI.Chat.ChatCompletionMessageParam;
+    }
+    return { ...rest, [this.#reasoningKey]: reasoning } as unknown as OpenAI.Chat.ChatCompletionMessageParam;
   }
 
   async uploadFile(opts: { file: File, isImage?: boolean }): Promise<ChatFile> {
@@ -312,19 +332,24 @@ export class OpenAICompatChat implements ChatSession {
         ? await this.#summarizeWithShrink(cut)
         : { summary: '', cut };
 
+      let removed: number;
       if (summary !== '') {
         this.#lastSummary = summary;
         this.#compactFailures = 0;
+        removed = appliedCut;
         this.#history = [
-          { role: 'user', content: summaryMessage(summary, appliedCut) },
-          ...this.#history.slice(appliedCut),
+          { role: 'user', content: summaryMessage(summary, removed) },
+          ...this.#history.slice(removed),
         ];
       } else {
-        // 要約できなかった (または連続失敗で諦めた)。要約の代わりに古い方を捨てる。
-        // 直近 (keepRecentCut が残した分) はそのまま残る
+        // 要約できなかった (または連続失敗で諦めた)。要約の代わりに、古い方から
+        // 全体の 1/3 を捨てる (足りなければループでもう 1/3)。直近は残るので、
+        // 会話の流れはできるだけ保つ
+        removed = this.#dropCut();
+        if (removed <= 0) return;
         this.#history = [
-          { role: 'user', content: droppedMessage(appliedCut) },
-          ...this.#history.slice(appliedCut),
+          { role: 'user', content: droppedMessage(removed) },
+          ...this.#history.slice(removed),
         ];
       }
 
@@ -332,7 +357,7 @@ export class OpenAICompatChat implements ChatSession {
       this.#historyBeforeTurn = [...this.#history];
       this.#compactedAtLen = this.#history.length;
       this.#lastInputTokens = undefined;
-      log(`compact: ${appliedCut} 件を${summary === '' ? '破棄' : '要約'} (${before} → ${contextTokens(this.#history)})`);
+      log(`compact: ${removed} 件を${summary === '' ? '破棄' : '要約'} (${before} → ${contextTokens(this.#history)})`);
       if (this.#history.length >= lengthBefore) return;
     }
   }
@@ -379,6 +404,28 @@ export class OpenAICompatChat implements ChatSession {
     }
     if (count > 0) log(`compact: 古いツール出力 ${count} 件を削った (${saved.toLocaleString()} 文字)`);
     return count;
+  }
+
+  /**
+   * 要約できないときに捨てる位置。古い方から全体の 1/3 のトークンぶんを落とす。
+   * tool 呼び出しの対応は割らない (safeCutPoint)。
+   */
+  #dropCut(): number {
+    const total = contextTokens(this.#history, this.#lastInputTokens);
+    const target = Math.max(1, Math.floor(total * DROP_SHARE));
+    let dropped = 0;
+    let cut = -1;
+    for (let i = 0; i < this.#history.length; i++) {
+      dropped += estimateTokens([this.#history[i]!]);
+      if (dropped < target) continue;
+      cut = i + 1;
+      break;
+    }
+    // 1 通だけで 1/3 を超えるような巨大なメッセージなら、その 1 通を捨てる
+    if (cut < 0) cut = this.#history.length - 1;
+    // 全部捨てない (最後の 1 通は必ず残す)
+    cut = Math.min(cut, this.#history.length - 1);
+    return safeCutPoint(this.#history, cut);
   }
 
   /** 直近を生のまま残す位置。tool 呼び出しの対応は割らない */
@@ -489,6 +536,7 @@ export class OpenAICompatChat implements ChatSession {
           // ツール呼び出しと同じチャンクに載ることもあるため、先に処理する
           const r = reasoningText(delta as ReasoningDelta);
           if (r.length > 0) {
+            this.#modelReasons = true;
             if (!sawReasoning) {
               sawReasoning = true;
               yield { type: 'reasoning-start' };

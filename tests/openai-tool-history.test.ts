@@ -185,3 +185,37 @@ test('ツールを大量に呼んだターンでも、前のターンは履歴�
   assert.ok(messages.some(m => m.role === 'user' && m.content === 'turn1'), '前のターンの発言が消えている');
   assertToolExchangesAreComplete(messages);
 });
+
+test('思考過程を返すモデルには、ツール呼び出しの assistant に reasoning を必ず付ける', async t => {
+  const bodies = mockFetch(t,
+    // 1 ラウンド目: 思考過程つきでツールを呼ぶ
+    () => stream(delta({ reasoning_content: 'まず調べる' }), toolCall('call_1'), done),
+    // 2 ラウンド目: 思考過程なしで本文を返す
+    () => stream(delta({ content: 'answer' }), done),
+    // 次のターン
+    () => stream(delta({ content: 'next' }), done),
+  );
+  const chat = new OpenAICompatChat(config, tools(async () => [true, { found: 42 }]));
+
+  await say(chat, 'turn1');
+  await say(chat, 'turn2');
+
+  const assistant = bodies.at(-1)!.messages.find(m => m.role === 'assistant' && m.tool_calls?.length)!;
+  assert.equal(assistant.reasoning_content, 'まず調べる', 'ツール呼び出しの直前の思考過程が消えている');
+  // 思考過程の無かった本文のターンには付けない (フィールドを知らないプロバイダ対策)
+  const plain = bodies.at(-1)!.messages.find(m => m.role === 'assistant' && !m.tool_calls?.length)!;
+  assert.equal(plain.reasoning_content, undefined);
+});
+
+test('思考過程を一度も返さないモデルには reasoning を付けない', async t => {
+  const bodies = mockFetch(t,
+    () => stream(toolCall('call_1'), done),
+    () => stream(delta({ content: 'answer' }), done),
+  );
+  const chat = new OpenAICompatChat(config, tools(async () => [true, {}]));
+  await say(chat, 'turn1');
+  for (const message of bodies[1]!.messages) {
+    assert.equal(message.reasoning_content, undefined);
+    assert.equal(message.reasoning, undefined);
+  }
+});

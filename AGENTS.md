@@ -82,8 +82,9 @@ docs/             機能ごとの仕様 (ai.md が AI の一次資料)
 - **reasoning** は OpenAI 公式のスキーマに無いフィールドです。`reasoning_content` (DeepSeek 系) と
   `reasoning` (OpenRouter) の両方を読み、`reasoning-start` → `reasoning-delta` として流します。
   返信本文には入れませんが、プロバイダが要求する場合は会話履歴の assistant メッセージに
-  `reasoning_content` / `reasoning` として再送します。思考過程の無いターンはフィールドごと
-  省きます (空文字は未知の引数として 400 になるプロバイダがある)。
+  `reasoning_content` / `reasoning` として再送します。**ツール呼び出しを含むメッセージだけは、
+  そのモデルが思考過程を返すなら空でも必ず付けます** (直前の思考を要求するプロバイダがある)。
+  思考過程を一度も返さないモデルには付けません (空文字は未知の引数として 400 になる)。
 - **会話履歴の不変条件** (`src/ai/openai.ts`): 履歴の先頭は必ず `user` メッセージ。
   ツール呼び出しとその結果の間で切らない (`assistant` の `tool_calls` には必ず対応する `tool`
   メッセージを積む。ツールが例外を投げてもエラーを `tool` 本文にして積む)。
