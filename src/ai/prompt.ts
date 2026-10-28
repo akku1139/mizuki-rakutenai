@@ -10,15 +10,17 @@ import { getMcpTools, getMcpStatus } from './mcp-registry.ts';
 export const buildSystemPrompt = async (guild?: Guild | null, provider?: string): Promise<string> => {
   const includeMcp = provider !== 'rakutenai';
   const mcpTools = includeMcp ? getMcpTools() : [];
+  const hasNotion = getMcpStatus().some(s => s.status === 'connected' && /notion/i.test(s.name));
+  const notionHint = hasNotion ? 'Notion のページ・データベース操作が可能な場合は、ユーザーの依頼に関連する情報の確認や記録に積極的に Notion ツールを使ってください。\\n' : '';
   const mcpSection = mcpTools.length > 0
     ? mcpTools.length > 20
       ? `===== MCP ツール =====
-MCP サーバーのツールは多数あるため、すべては送られていません。
+${notionHint}MCP サーバーのツールは多数あるため、すべては送られていません。
 利用可能なサーバー: ${getMcpStatus().filter(s => s.status === 'connected').map(s => `${s.name}${s.toolCount ? ` (${s.toolCount} tools)` : ''}`).join(', ')}
 search_tools でキーワード検索し、run_tool で tool_id を指定して実行してください。
 ==========`
       : `===== MCP ツール =====
-MCP ツールは search_tools/run_tool 経由で利用できます。
+${notionHint}MCP ツールは search_tools/run_tool 経由で利用できます。
 ==========`
     : '';
 
