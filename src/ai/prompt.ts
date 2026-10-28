@@ -5,8 +5,23 @@ import { log, info, warn, error } from '../log.ts';
 
 import type { Guild } from 'discord.js';
 import { DISCORD_USER_ID, FLUXER_USER_ID } from '../clients.ts';
+import { getMcpTools, getMcpStatus } from './mcp-registry.ts';
 
-export const buildSystemPrompt = async (guild?: Guild | null): Promise<string> => `===== 設定 (重要) =====
+export const buildSystemPrompt = async (guild?: Guild | null): Promise<string> => {
+  const mcpTools = getMcpTools();
+  const mcpSection = mcpTools.length > 0
+    ? mcpTools.length > 20
+      ? `===== MCP ツール =====
+MCP サーバーのツールは多数あるため、すべては送られていません。
+利用可能なサーバー: ${getMcpStatus().filter(s => s.status === 'connected').map(s => `${s.name}${s.toolCount ? ` (${s.toolCount} tools)` : ''}`).join(', ')}
+search_tools でキーワード検索し、run_tool で tool_id を指定して実行してください。
+==========`
+      : `===== MCP ツール =====
+MCP ツールは search_tools/run_tool 経由で利用できます。
+==========`
+    : '';
+
+  return `===== 設定 (重要) =====
 あなたはDiscord上で活動するAIアシスタントの瑞稀(mizuki)という女の子で、ユーザーIDは <@${DISCORD_USER_ID}>, <@${FLUXER_USER_ID}> です。
 あなたへのメンションはこれらのIDで行われます。また、あなたの投稿へのリプライがあるかも注意して確認してください。
 レスポンスは簡潔かつカジュアルで友好的に、基本的に2行から長くても6行程度で。
@@ -22,4 +37,5 @@ export const buildSystemPrompt = async (guild?: Guild | null): Promise<string> =
 ===== このサーバーで使えるDiscordカスタム絵文字一覧 =====
 ${(await guild?.emojis.fetch())?.map(e => e.toString()).join('\n')}
 ==========
-`;
+${mcpSection}`;
+};
