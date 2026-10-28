@@ -756,15 +756,17 @@ export let aitools: Record<string, AITool> = {
 
 /** OpenAI function calling 形式のツール定義に変換する ($explain を自動追加) */
 const searchMcpTools: AITool = {
-  description: 'MCP ツールをキーワードで検索します。query が空なら一覧を返します。',
+  description: 'MCP ツールをキーワードで検索します。query が空なら一覧を返します。'
+    + '既定では引数のスキーマを返さないので、必要なときだけ include_schema: true にしてください。',
   parametersJsonSchema: {
     type: 'object',
     properties: {
       query: { type: 'string', description: '検索キーワード' },
       offset: { type: 'number', description: 'オフセット (既定 0)' },
+      include_schema: { type: 'boolean', description: '引数のスキーマも返す (トークンを使うので既定は false)' },
     },
   },
-  async execute({ query, offset }) {
+  async execute({ query, offset, include_schema }) {
     const q = typeof query === 'string' ? query.toLowerCase().trim() : '';
     const off = typeof offset === 'number' ? Math.max(0, Math.trunc(offset)) : 0;
     const all = getMcpTools();
@@ -788,8 +790,8 @@ const searchMcpTools: AITool = {
         tool_id: flattenToolName(t.server, t.name),
         server: t.server,
         name: t.name,
-        description: t.description.slice(0, 1000),
-        inputSchema: t.inputSchema,
+        description: t.description.slice(0, include_schema === true ? 1_000 : 200),
+        ...(include_schema === true ? { inputSchema: t.inputSchema } : {}),
       })),
       totalMatches: filtered.length,
       nextOffset: off + page.length < filtered.length ? off + page.length : null,
@@ -835,7 +837,7 @@ export const getAllAitools = (): Record<string, AITool> => {
         async execute(args) {
           const r = await callMcpTool(flat, args);
           if (r === null) return [false, { error: 'mcp tool not found' }];
-          return [r.ok, r.text] as AIToolResult;
+          return r.ok ? [true, r.text] : [false, { error: r.text }];
         },
       };
     }

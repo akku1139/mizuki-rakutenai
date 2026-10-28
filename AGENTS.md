@@ -104,6 +104,9 @@ docs/             機能ごとの仕様 (ai.md が AI の一次資料)
   サーバーごとに `data/memory/<guildId>.json`。書き込みは `memory` ツールに一本化し、
   Notion を直接叩かせない (重複する)。**ローカルに DB は作らない**方針 (sakana 式の木を
   入れるときは Notion 側に置く)。
+- **MCP の結果は text だけではない** (`src/ai/mcp.ts` の `resultText`)。`resource` /
+  `resource_link` / `image` / `audio` / `structuredContent` をテキストにする。text だけを見ると
+  GitHub MCP の `get_file_contents` の中身が消える (実際にこれで読めなかった)。
 - **メッセージ検索は Discord の検索 API** (`search_messages`)。bot でも使える
   (`GET /guilds/{id}/messages/search`、要 `READ_MESSAGE_HISTORY`)。使えないときだけ
   チャンネルを遡る自前実装に落ちる。クエリの解釈は `src/ai/search-query.ts`。

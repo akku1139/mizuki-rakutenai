@@ -69,6 +69,8 @@ pnpm typecheck   # tsc --noEmit
 | `tests/model-meta.test.ts` | モデルカタログ (models.dev とプロバイダの /models) の解決 |
 | `tests/memory.test.ts` | 記憶の保存・重複排除・上限・想起の優先順と文字数・`memory` ツール |
 | `tests/jobs.test.ts` | バックグラウンドジョブ (Discord に送らない実行・中断・記録) |
+| `tests/search-query.test.ts` | メッセージ検索のクエリ解釈と、公式検索 API / 自前の遡り |
+| `tests/mcp-result.test.ts` | MCP のツール結果 (resource / 画像 / structuredContent) のテキスト化 |
 
 GitHub Actions (`.github/workflows/ci.yml`) で、main への push と PR のたびに両方を実行します。
 

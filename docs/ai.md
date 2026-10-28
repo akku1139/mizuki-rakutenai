@@ -251,6 +251,21 @@ API が 400 を返してそのセッションは捨てられます** (小さい�
 ツールの実行とモデルの再生成に回数上限は設けていません。モデルがツール呼び出しを返し続ける限りループします。
 1回の API リクエストのタイムアウトは120秒です。
 
+## MCP ツール
+
+`data/config.json` の `mcpServers` でつないだ MCP サーバーのツールを、モデルから使えるようにします
+(`src/ai/mcp.ts` / `src/ai/mcp-registry.ts`)。実装は teapot のクライアントの移植です。
+
+- ツールが 20 個以下なら、そのまま `mcp__<サーバー名>__<ツール名>` として並べます
+- それを超えると、`search_tools` (キーワード検索) と `run_tool` (tool_id を指定して実行) の 2 つに畳みます。
+  `search_tools` は既定で引数のスキーマを返しません (トークンを使うため)。必要なら `include_schema: true`
+- ツールの結果は **text だけではありません**。`resource` (埋め込みリソース)・`resource_link`・
+  `image`・`audio`・`structuredContent` をすべてテキストにします。`resource` が `text` を持たず
+  `uri` だけなら `resources/read` で取りに行きます。ここを text だけにすると、GitHub MCP の
+  `get_file_contents` のようなサーバーが返す**ファイルの中身がまるごと捨てられ**、
+  モデルには `[resource content omitted]` しか届きません
+- 失敗したツールは `ok=false` として、エラー本文を `{ error }` で返します
+
 ## メッセージ検索 (`search_messages`)
 
 Discord の検索 API (`GET /guilds/{id}/messages/search`) を使います。**bot からも使えます**が、

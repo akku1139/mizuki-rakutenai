@@ -54,13 +54,62 @@ export interface McpConnection {
   close(): Promise<void>;
 }
 
-function resultText(result: { content?: Array<{ type?: string; text?: string }>; isError?: boolean }): { text: string; ok: boolean } {
-  const parts: string[] = [];
-  for (const c of result?.content ?? []) {
-    if (c?.type === 'text' && typeof c.text === 'string') parts.push(c.text);
-    else if (c?.type) parts.push(`[${c.type} content omitted]`);
+/** ツール結果の中の 1 ブロックを、モデルに渡せるテキストにする */
+const blockText = async (
+  block: any,
+  read: (uri: string) => Promise<string>,
+): Promise<string> => {
+  const type = block?.type;
+  if (type === 'text' && typeof block.text === 'string') return block.text;
+  if (type === 'image') {
+    return `[画像 ${block.mimeType ?? '不明'} (${Math.round((block.data?.length ?? 0) * 0.75).toLocaleString()} バイト)]`;
   }
-  return { text: parts.join('\n') || '(no content)', ok: result?.isError !== true };
+  if (type === 'audio') {
+    return `[音声 ${block.mimeType ?? '不明'} (${Math.round((block.data?.length ?? 0) * 0.75).toLocaleString()} バイト)]`;
+  }
+  // 埋め込みリソース: テキストなら中身、blob なら概要、uri だけなら取りに行く
+  if (type === 'resource') {
+    const resource = block.resource ?? {};
+    if (typeof resource.text === 'string') return resource.text;
+    if (typeof resource.blob === 'string') {
+      return `[バイナリ ${resource.mimeType ?? '不明'} (${Math.round(resource.blob.length * 0.75).toLocaleString()} バイト)]`;
+    }
+    if (typeof resource.uri === 'string') return await read(resource.uri);
+    return '[resource content omitted]';
+  }
+  // リソースへのリンク: 中身を取りに行く (取れなければリンクを返す)
+  if (type === 'resource_link') {
+    if (typeof block.uri === 'string') {
+      const body = await read(block.uri);
+      if (body !== '') return body;
+      return `[${block.name ?? 'resource'}] ${block.uri}`;
+    }
+    return '[resource_link content omitted]';
+  }
+  return type === undefined ? '' : `[${type} content omitted]`;
+};
+
+/**
+ * ツールの結果をテキストにする。
+ *
+ * MCP のツール結果は text だけではない。GitHub MCP の `get_file_contents` のように
+ * `resource` (埋め込みリソース) で返す実装があり、text 以外を捨てるとモデルには
+ * 「[resource content omitted]」しか届かない (実際にこれでファイルの中身が読めなかった)。
+ */
+export async function resultText(
+  result: { content?: Array<Record<string, unknown>>; structuredContent?: unknown; isError?: boolean },
+  readResource: (uri: string) => Promise<string>,
+): Promise<{ text: string; ok: boolean }> {
+  const parts: string[] = [];
+  for (const block of result?.content ?? []) {
+    const text = await blockText(block, readResource);
+    if (text !== '') parts.push(text);
+  }
+  if (parts.length === 0 && result?.structuredContent !== undefined) {
+    parts.push(JSON.stringify(result.structuredContent, null, 2));
+  }
+  const text = parts.join('\n').trim();
+  return { text: text === '' ? '(no content)' : text, ok: result?.isError !== true };
 }
 
 function toTools(list: { tools?: Array<Record<string, unknown>> }, server: string): McpTool[] {
@@ -149,7 +198,20 @@ export async function connectMcp(cfg: McpServerConfig, auth?: { provider: any })
     },
     async call(name, args) {
       const res: any = await client.callTool({ name, arguments: (args ?? {}) as Record<string, unknown> });
-      return resultText(res);
+      return resultText(res, async (uri: string) => {
+        try {
+          const read: any = await client.readResource({ uri });
+          const contents: any[] = read?.contents ?? [];
+          return contents
+            .map(c => (typeof c?.text === 'string'
+              ? c.text
+              : `[バイナリ ${c?.mimeType ?? '不明'} (${Math.round((c?.blob?.length ?? 0) * 0.75).toLocaleString()} バイト)]`))
+            .join('\n')
+            .trim();
+        } catch (err) {
+          return `[${uri} は読めませんでした: ${err instanceof Error ? err.message : String(err)}]`;
+        }
+      });
     },
     async finishAuth(code: string, iss?: string) {
       if (typeof (session as any).finishAuth !== 'function') throw new Error('this transport has no OAuth flow');
