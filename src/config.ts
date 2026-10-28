@@ -26,6 +26,7 @@ export interface McpServerConfig {
 
 export interface Config {
   mcpServers?: McpServerConfig[];
+  blacklistedChannels?: string[];
   discord?: {
     token?: string;
     logWebhookUrl?: string;

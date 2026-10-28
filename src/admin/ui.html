@@ -30,6 +30,7 @@ th{color:var(--accent)}
 <button data-tab="ai">AI 設定</button>
 <button data-tab="logs">ログ</button>
 <button data-tab="mcp">MCP</button>
+<button data-tab="channels">チャンネル</button>
 </nav></header>
 <main>
 <section id="status"><div class="card"><h3>ランタイム</h3><div class="kv" id="runtime"></div></div><div class="card"><h3>会話一覧</h3><table id="sessions"><tr><th>キー</th><th>プロバイダ</th><th>ラベル</th></tr></table></div><div class="card"><h3>安価</h3><table id="ankas"><tr><th>target</th><th>count</th><th>channel</th><th>url</th></tr></table></div></section>
@@ -42,6 +43,7 @@ th{color:var(--accent)}
 <dt>command</dt><dd><input id="m_cmd"></dd>
 <dt>transport</dt><dd><select id="m_tr"><option>http</option><option>sse</option><option>stdio</option></select></dd>
 </div><button onclick="addMcp()">追加</button></div></section>
+<section id="channels" hidden><div class="card"><h3>チャンネル一覧</h3><table id="channelsTable"><tr><th>プラットフォーム</th><th>チャンネル</th><th>ブラックリスト</th></tr></table></div></section>
 </main>
 <script>
 const tabs=document.querySelectorAll('nav button');
@@ -60,6 +62,7 @@ async function refresh(){
   const sy=await api('/api/sync');const syt=document.getElementById('syncs');syt.innerHTML='<tr><th>Discord ch</th><th>Fluxer ch</th></tr>';sy.forEach(x=>row(syt,[x.discordChannelId,x.fluxerChannelId]));
   const pr=await api('/api/ai-prefs');const prt=document.getElementById('prefs');prt.innerHTML='<tr><th>ユーザー ID</th><th>プロバイダ</th></tr>';Object.entries(pr).forEach(([k,v])=>row(prt,[k,v]));
   const lg=await api('/api/logs');const lb=document.getElementById('logbox');lb.innerHTML='';lg.forEach(e=>{const d=document.createElement('div');d.className=e.level;d.textContent=`[${new Date(e.ts).toLocaleTimeString()}] ${e.message}`;lb.appendChild(d);});
+  const chs=await api('/api/channels');const cht=document.getElementById('channelsTable');cht.innerHTML='<tr><th>プラットフォーム</th><th>チャンネル</th><th>ブラックリスト</th></tr>';chs.forEach(x=>{const tr=document.createElement('tr');const td1=document.createElement('td');td1.textContent=x.platform;tr.appendChild(td1);const td2=document.createElement('td');td2.textContent=x.name;tr.appendChild(td2);const td3=document.createElement('td');const cb=document.createElement('input');cb.type='checkbox';cb.checked=x.blacklisted;cb.onchange=async()=>{await fetch('/api/blacklist',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify({channelId:x.id,blacklisted:cb.checked})});};td3.appendChild(cb);tr.appendChild(td3);cht.appendChild(tr);});
   const mc=await api('/api/mcp');const mct=document.getElementById('mcps');mct.innerHTML='<tr><th>名前</th><th>状態</th><th>ツール数</th><th>操作</th></tr>';mc.forEach(x=>{const tr=document.createElement('tr');[x.name,x.status,x.toolCount].forEach(c=>{const td=document.createElement('td');td.textContent=c;tr.appendChild(td);});const td=document.createElement('td');
 const cb=document.createElement('button');cb.textContent='接続';cb.onclick=()=>connectMcp(x.name);td.appendChild(cb);
 if(x.oauthRequired){const ob=document.createElement('button');ob.textContent='認証';ob.onclick=async()=>{const r=await fetch('/api/mcp/oauth',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify({name:x.name})});const j=await r.json();if(j.url)window.open(j.url,'_blank');};td.appendChild(ob);}

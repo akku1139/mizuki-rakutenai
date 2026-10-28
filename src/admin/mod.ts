@@ -10,6 +10,7 @@ import { getAIStatus } from '../ai/mod.ts';
 import { getAllPrefs } from '../ai/prefs.ts';
 import { getAnkas } from '../anka.ts';
 import { getSyncPairs } from '../fluxsync/mod.ts';
+import { discord, fluxer } from '../clients.ts';
 import { getMcpStatus, applyMcpConfigs, connectMcpServer, startMcpOAuth } from '../ai/mcp-registry.ts';
 
 const PORT = get(config, 'admin.port', 8080);
@@ -108,6 +109,39 @@ export const setupAdmin = (): void => {
       try {
         const { name } = JSON.parse(body);
         await connectMcpServer(name);
+        json(res, 200, { ok: true });
+      } catch (e: any) {
+        json(res, 400, { error: e?.message ?? String(e) });
+      }
+    });
+    return;
+  }
+  if (parsed.pathname === '/api/channels' && req.method === 'GET') {
+    const out: Array<{ id: string, name: string, platform: string, blacklisted: boolean }> = [];
+    for (const [client, platform] of [[discord, 'discord'], [fluxer, 'fluxer']] as const) {
+      for (const g of client.guilds.cache.values()) {
+        for (const c of g.channels.cache.values()) {
+          if (!c.isTextBased()) continue;
+          out.push({ id: c.id, name: `${g.name} / ${c.name}`, platform, blacklisted: (config.blacklistedChannels ?? []).includes(c.id) });
+        }
+      }
+    }
+    json(res, 200, out);
+    return;
+  }
+  if (parsed.pathname === '/api/blacklist' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const { channelId, blacklisted } = JSON.parse(body);
+        config.blacklistedChannels = config.blacklistedChannels ?? [];
+        if (blacklisted) {
+          if (!config.blacklistedChannels.includes(channelId)) config.blacklistedChannels.push(channelId);
+        } else {
+          config.blacklistedChannels = config.blacklistedChannels.filter(x => x !== channelId);
+        }
+        saveConfig();
         json(res, 200, { ok: true });
       } catch (e: any) {
         json(res, 400, { error: e?.message ?? String(e) });
