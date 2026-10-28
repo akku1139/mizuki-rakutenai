@@ -73,7 +73,7 @@ export class ServerAuth implements OAuthClientProvider {
 
   get clientMetadata(): OAuthClientMetadata {
     return {
-      client_name: "teapot",
+      client_name: "mizuki",
       redirect_uris: [this.redirectUrl],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
@@ -295,7 +295,7 @@ function page(title: string, body: string): string {
 <style>body{font:15px system-ui;margin:12vh auto;max-width:34rem;text-align:center;color:#222}
 h1{font-size:1.1rem}p{color:#555}</style>
 <h1>${title}</h1><p>${body}</p>
-<p>You can close this tab and return to teapot.</p>`;
+<p>You can close this tab and return to mizuki.</p>`;
 }
 
 type StoreFile = Record<string, StoredAuth>;
