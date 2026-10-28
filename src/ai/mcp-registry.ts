@@ -5,18 +5,24 @@
 import { config, get } from '../config.ts';
 import { log, error } from '../log.ts';
 import { connectMcp, flattenToolName, splitToolName, type McpConnection, type McpServerConfig, type McpTool } from './mcp.ts';
+import { McpAuthStore, ServerAuth, listenForCallback, FLOW_TIMEOUT_MS } from './mcp-oauth-manager.ts';
 
 interface State {
   cfg: McpServerConfig;
   conn?: McpConnection;
   tools: McpTool[];
-  status: 'disconnected' | 'connecting' | 'connected' | 'error' | 'disabled';
+  status: 'disconnected' | 'connecting' | 'connected' | 'error' | 'disabled' | 'authorizing';
   lastError?: string;
+  oauthRequired?: boolean;
 }
 
 const states = new Map<string, State>();
+const auths = new Map<string, ServerAuth>();
+let store: McpAuthStore | null = null;
+const flows = new Map<string, { redirectUrl: string; wait: (t: number) => Promise<{ code: string; iss?: string }>; close: () => Promise<void> }>();
 
 export const applyMcpConfigs = (configs: McpServerConfig[]): void => {
+  if (!store) store = new McpAuthStore('./data');
   const wanted = new Set(configs.map(c => c.name));
   for (const [name, st] of states) {
     if (!wanted.has(name)) {
@@ -40,19 +46,38 @@ export const applyMcpConfigs = (configs: McpServerConfig[]): void => {
   }
 };
 
+const authFor = async (name: string): Promise<ServerAuth | undefined> => {
+  if (!store) store = new McpAuthStore('./data');
+  const existing = auths.get(name);
+  if (existing) return existing;
+  const stored = await store.get(name);
+  const auth = new ServerAuth(name, 'http://127.0.0.1/callback', (server, data) => store!.set(server, data));
+  await auth.hydrate(stored);
+  auths.set(name, auth);
+  return auth;
+};
+
 export const connectMcpServer = async (name: string): Promise<void> => {
   const st = states.get(name);
   if (!st) throw new Error(`no such MCP server: ${name}`);
   st.status = 'connecting';
   st.lastError = undefined;
+  const auth = await authFor(name);
+  const authArg = auth ? { provider: auth } : undefined;
   try {
-    const conn = await connectMcp(st.cfg);
+    const conn = await connectMcp(st.cfg, authArg);
     st.conn = conn;
     st.tools = await conn.tools();
     st.status = 'connected';
+    st.oauthRequired = false;
   } catch (e: any) {
     st.status = 'error';
     st.lastError = e?.message ?? String(e);
+    const needsAuth = e?.status === 401 || e?.status === 403 || /unauthoriz|invalid_token|authorization required/i.test(e?.message ?? '');
+    if (needsAuth) {
+      st.oauthRequired = true;
+      st.lastError = 'this server requires OAuth — use authorize';
+    }
     throw e;
   }
 };
@@ -64,14 +89,22 @@ export const connectAllMcp = async (): Promise<void> => {
     const st = states.get(name)!;
     if (st.cfg.enabled === false) { st.status = 'disabled'; return; }
     st.status = 'connecting';
+    const auth = await authFor(name);
+    const authArg = auth ? { provider: auth } : undefined;
     try {
-      const conn = await connectMcp(st.cfg);
+      const conn = await connectMcp(st.cfg, authArg);
       st.conn = conn;
       st.tools = await conn.tools();
       st.status = 'connected';
+      st.oauthRequired = false;
     } catch (e: any) {
       st.status = 'error';
       st.lastError = e?.message ?? String(e);
+      const needsAuth = e?.status === 401 || e?.status === 403 || /unauthoriz|invalid_token|authorization required/i.test(e?.message ?? '');
+      if (needsAuth) {
+        st.oauthRequired = true;
+        st.lastError = 'this server requires OAuth — use authorize';
+      }
       error('mcp connect failed:', st.cfg.name, e);
     }
   }));
@@ -99,5 +132,52 @@ export const callMcpTool = async (flatName: string, args: unknown): Promise<{ ok
   }
 };
 
-export const getMcpStatus = (): Array<{ name: string; status: string; toolCount: number; lastError?: string }> =>
-  [...states.values()].map(s => ({ name: s.cfg.name, status: s.status, toolCount: s.tools.length, lastError: s.lastError }));
+export const getMcpStatus = (): Array<{ name: string; status: string; toolCount: number; lastError?: string; oauthRequired?: boolean }> =>
+  [...states.values()].map(s => ({ name: s.cfg.name, status: s.status, toolCount: s.tools.length, lastError: s.lastError, oauthRequired: s.oauthRequired }));
+
+export const startMcpOAuth = async (name: string): Promise<{ url: string }> => {
+  const st = states.get(name);
+  if (!st) throw new Error(`no such MCP server: ${name}`);
+  const existing = flows.get(name);
+  if (existing) await existing.close().catch(() => {});
+  const flow = await listenForCallback();
+  flows.set(name, flow);
+  const auth = await authFor(name);
+  if (!auth) throw new Error('auth unavailable');
+  const authArg = { provider: auth };
+  st.status = 'authorizing';
+  // trigger OAuth
+  connectMcp(st.cfg, authArg).then(async conn => {
+    st.conn = conn;
+    st.tools = await conn.tools();
+    st.status = 'connected';
+    st.oauthRequired = false;
+    await flow.close().catch(() => {});
+    flows.delete(name);
+  }).catch(async err => {
+    if (err?.connection) {
+      const conn = err.connection as McpConnection;
+      const { code, iss } = await flow.wait(FLOW_TIMEOUT_MS);
+      try {
+        const newConn = await conn.finishAuth(code, iss);
+        st.conn = newConn;
+        st.tools = await newConn.tools();
+        st.status = 'connected';
+        st.oauthRequired = false;
+      } catch (e: any) {
+        st.status = 'error';
+        st.lastError = e?.message ?? String(e);
+      }
+    } else {
+      st.status = 'error';
+      st.lastError = err?.message ?? String(err);
+    }
+    await flow.close().catch(() => {});
+    flows.delete(name);
+  });
+  // wait briefly for redirect URL
+  await new Promise(r => setTimeout(r, 200));
+  const url = auth.pendingUrl?.() ?? (auth as any).authUrl?.toString?.();
+  if (!url) throw new Error('failed to obtain authorization URL');
+  return { url };
+};

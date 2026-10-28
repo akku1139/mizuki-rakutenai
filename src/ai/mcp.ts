@@ -50,6 +50,7 @@ export interface McpAuth { provider: unknown; }
 export interface McpConnection {
   tools(): Promise<McpTool[]>;
   call(name: string, args: unknown): Promise<{ text: string; ok: boolean }>;
+  finishAuth(code: string, iss?: string): Promise<McpConnection>;
   close(): Promise<void>;
 }
 
@@ -78,7 +79,7 @@ function toTools(list: { tools?: Array<Record<string, unknown>> }, server: strin
   return out;
 }
 
-export async function connectMcp(cfg: McpServerConfig): Promise<McpConnection> {
+export async function connectMcp(cfg: McpServerConfig, auth?: { provider: any }): Promise<McpConnection> {
   const sdk = await mcpSdk();
   const transport = cfg.transport ?? (cfg.command && !cfg.url ? 'stdio' : 'http');
   const client = new sdk.Client({ name: 'mizuki', version: '1' });
@@ -99,6 +100,7 @@ export async function connectMcp(cfg: McpServerConfig): Promise<McpConnection> {
     session = new sdk.SSEClientTransport(url, {
       redirectPolicy: 'same-origin',
       ...(cfg.headers ? { requestInit: { headers: cfg.headers } } : {}),
+      ...(auth ? { authProvider: auth.provider } : {}),
     });
   } else {
     if (!cfg.url) throw new Error(`MCP server "${cfg.name}" has no url`);
@@ -106,10 +108,29 @@ export async function connectMcp(cfg: McpServerConfig): Promise<McpConnection> {
     session = new sdk.StreamableHTTPClientTransport(url, {
       redirectPolicy: 'same-origin',
       ...(cfg.headers ? { requestInit: { headers: cfg.headers } } : {}),
+      ...(auth ? { authProvider: auth.provider } : {}),
     });
   }
 
-  await client.connect(session);
+  try {
+    await client.connect(session);
+  } catch (err) {
+    if (auth) {
+      const conn = {
+        async tools() { return []; },
+        async call() { return { text: 'not connected', ok: false }; },
+        async finishAuth(code: string, iss?: string) {
+          if (typeof (session as any).finishAuth !== 'function') throw new Error('this transport has no OAuth flow');
+          await (session as any).finishAuth(iss === undefined ? code : new URLSearchParams({ code, iss }));
+          await client.close().catch(() => {});
+          return await connectMcp(cfg, auth);
+        },
+        async close() { await client.close().catch(() => {}); },
+      } as McpConnection;
+      throw Object.assign(err as Error, { connection: conn });
+    }
+    throw err;
+  }
   return {
     async tools() {
       const all: McpTool[] = [];
@@ -129,6 +150,12 @@ export async function connectMcp(cfg: McpServerConfig): Promise<McpConnection> {
     async call(name, args) {
       const res: any = await client.callTool({ name, arguments: (args ?? {}) as Record<string, unknown> });
       return resultText(res);
+    },
+    async finishAuth(code: string, iss?: string) {
+      if (typeof (session as any).finishAuth !== 'function') throw new Error('this transport has no OAuth flow');
+      await (session as any).finishAuth(iss === undefined ? code : new URLSearchParams({ code, iss }));
+      await client.close().catch(() => {});
+      return await connectMcp(cfg, auth);
     },
     async close() {
       await client.close().catch(() => {});

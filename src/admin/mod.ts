@@ -10,7 +10,7 @@ import { getAIStatus } from '../ai/mod.ts';
 import { getAllPrefs } from '../ai/prefs.ts';
 import { getAnkas } from '../anka.ts';
 import { getSyncPairs } from '../fluxsync/mod.ts';
-import { getMcpStatus, applyMcpConfigs, connectMcpServer } from '../ai/mcp-registry.ts';
+import { getMcpStatus, applyMcpConfigs, connectMcpServer, startMcpOAuth } from '../ai/mcp-registry.ts';
 
 const PORT = get(config, 'admin.port', 8080);
 const TOKEN = get(config, 'admin.token', null);
@@ -85,6 +85,20 @@ export const setupAdmin = (): void => {
     saveConfig();
     applyMcpConfigs(config.mcpServers);
     json(res, 200, { ok: true });
+    return;
+  }
+  if (parsed.pathname === '/api/mcp/oauth' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', async () => {
+      try {
+        const { name } = JSON.parse(body);
+        const r = await startMcpOAuth(name);
+        json(res, 200, r);
+      } catch (e: any) {
+        json(res, 400, { error: e?.message ?? String(e) });
+      }
+    });
     return;
   }
   if (parsed.pathname === '/api/mcp/connect' && req.method === 'POST') {
