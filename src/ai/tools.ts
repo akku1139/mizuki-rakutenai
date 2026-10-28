@@ -130,6 +130,82 @@ const fetchMessage: AITool = {
   },
 };
 
+/// search_messages: サーバー内のメッセージを検索 (ブラックリストチャンネルは除外)
+
+const searchMessages: AITool = {
+  description: '現在のサーバー内のテキストチャンネル/スレッドを横断してメッセージを検索します。ブラックリストのチャンネルは結果に含まれません。',
+  parametersJsonSchema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: '検索クエリ (部分一致)' },
+      limit: { type: 'number', description: '最大件数 (既定 20, 最大 50)' },
+    },
+    required: ['query'],
+  },
+  async execute({ query, limit }, { msg }) {
+    try {
+      if (!msg.guild) return [false, { error: 'サーバー内でのみ使用できます' }];
+      const q = String(query ?? '').toLowerCase();
+      if (!q) return [false, { error: 'query は必須です' }];
+      const lim = typeof limit === 'number' ? Math.min(Math.max(Math.trunc(limit), 1), 50) : 20;
+      const black = config.blacklistedChannels ?? [];
+      const isBlacklisted = (id: string, parentId?: string | null) =>
+        black.includes(id) || (!!parentId && black.includes(parentId));
+      const results: Array<Record<string, unknown>> = [];
+      for (const ch of msg.guild.channels.cache.values()) {
+        if (!ch.isTextBased()) continue;
+        if (isBlacklisted(ch.id, (ch as { parentId?: string | null }).parentId)) continue;
+        try {
+          const msgs = await (ch as any).messages.fetch({ limit: 50 });
+          for (const m of msgs.values()) {
+            if (typeof m.content === 'string' && m.content.toLowerCase().includes(q)) {
+              results.push({
+                id: m.id,
+                channelId: ch.id,
+                channelName: (ch as any).name,
+                author: m.author?.username ?? m.author?.displayName,
+                authorId: m.author?.id,
+                content: m.content.slice(0, 300),
+                url: m.url,
+              });
+              if (results.length >= lim) break;
+            }
+          }
+        } catch {
+          // 取得できないチャンネルはスキップ
+        }
+        if (results.length >= lim) break;
+      }
+      // スレッドも検索
+      for (const t of (msg.guild as any).threads?.cache?.values?.() ?? []) {
+        if (results.length >= lim) break;
+        if (isBlacklisted(t.id, t.parentId)) continue;
+        try {
+          const msgs = await t.messages.fetch({ limit: 50 });
+          for (const m of msgs.values()) {
+            if (typeof m.content === 'string' && m.content.toLowerCase().includes(q)) {
+              results.push({
+                id: m.id,
+                channelId: t.id,
+                channelName: `#${t.parent?.name ?? '?'} / ${t.name}`,
+                author: m.author?.username ?? m.author?.displayName,
+                authorId: m.author?.id,
+                content: m.content.slice(0, 300),
+                url: m.url,
+              });
+              if (results.length >= lim) break;
+            }
+          }
+        } catch {
+        }
+      }
+      return [true, { count: results.length, messages: results }];
+    } catch (err) {
+      return [false, errText(err)];
+    }
+  },
+};
+
 /// fetch_messages_history: 特定メッセージ周辺の履歴を取得
 
 const fetchMessagesHistory: AITool = {
@@ -372,6 +448,7 @@ const searchWeb: AITool = {
 export let aitools: Record<string, AITool> = {
   fetch_message: fetchMessage,
   fetch_messages_history: fetchMessagesHistory,
+  search_messages: searchMessages,
   wikipedia_search: wikipediaSearch,
   wikipedia_read: wikipediaRead,
   ...(readabilityEndpoint ? { read_web: readWeb } : {}),
