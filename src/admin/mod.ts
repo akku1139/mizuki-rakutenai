@@ -33,7 +33,7 @@ const authorized = (req: http.IncomingMessage): boolean => {
 };
 
 export const setupAdmin = (): void => {
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const url = req.url ?? '/';
   const parsed = new URL(url, 'http://localhost');
   if (parsed.pathname === '/' || parsed.pathname === '/index.html') {
@@ -128,7 +128,14 @@ export const setupAdmin = (): void => {
           const cat = c.parentId ? cats.get(c.parentId) : undefined;
           out.push({ id: c.id, name: `${g.name} / ${cat ? cat + ' / ' : ''}${c.name}`, platform, position: (c as any).rawPosition ?? (c as any).position ?? 0, blacklisted: (config.blacklistedChannels ?? []).includes(c.id) || (!!c.parentId && (config.blacklistedChannels ?? []).includes(c.parentId)) });
         }
-        for (const t of (g as any).threads?.cache?.values?.() ?? []) {
+        let threads: any[] = [];
+        try {
+          const fetched = await (g as any).threads?.fetchActive?.();
+          threads = fetched ? [...fetched.threads.values()] : [...((g as any).threads?.cache?.values?.() ?? [])];
+        } catch {
+          threads = [...((g as any).threads?.cache?.values?.() ?? [])];
+        }
+        for (const t of threads) {
           out.push({ id: t.id, name: `${g.name} / #${t.parent?.name ?? '?'} / ${t.name}`, platform, position: (t as any).rawPosition ?? 0, blacklisted: (config.blacklistedChannels ?? []).includes(t.id) || (!!t.parentId && (config.blacklistedChannels ?? []).includes(t.parentId)) });
         }
       }
