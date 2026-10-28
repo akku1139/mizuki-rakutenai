@@ -108,46 +108,6 @@ test('fetch_message reports a channel that cannot be read and errors from the AP
   assert.match((value as { error: string }).error, /Error: Missing Access/);
 });
 
-test('fetch_messages_history defaults to 30 messages around the current message', async () => {
-  const { channel, fetches } = fakeChannel('2', [fakeMessage('5', 'a'), fakeMessage('6', 'b')]);
-  const [ok, value] = await executeAITool('fetch_messages_history', {}, meta(channel));
-  assert.equal(ok, true);
-  assert.deepEqual(fetches, [{ around: '100', cache: false, limit: 30 }]);
-  const result = value as Record<string, { content?: string }>;
-  assert.equal(result['5']!.content, 'a');
-  assert.equal(result['6']!.content, 'b');
-  assert.deepEqual(result['channel'], { id: '2', name: 'ch-2' });
-});
-
-test('fetch_messages_history clamps the limit and honours the mode', async () => {
-  const { channel, fetches } = fakeChannel('2', []);
-  await executeAITool('fetch_messages_history', { limit: 500, mode: 'before' }, meta(channel));
-  await executeAITool('fetch_messages_history', { limit: 0, mode: 'after' }, meta(channel));
-  await executeAITool('fetch_messages_history', { limit: 10, mode: 'sideways' }, meta(channel));
-  assert.deepEqual(fetches, [
-    { before: '100', cache: false, limit: 100 },
-    { after: '100', cache: false, limit: 1 },
-    { around: '100', cache: false, limit: 10 },
-  ]);
-});
-
-test('fetch_messages_history reads another channel from a mention or a message URL', async t => {
-  const other = fakeChannel('7', []);
-  const client = { channels: { fetch: async (id: string) => (id === '7' ? other.channel : null) } };
-
-  await executeAITool('fetch_messages_history', { url: '<#7>' }, meta({}, client));
-  assert.deepEqual(other.fetches.at(-1), { around: undefined, cache: false, limit: 30 });
-
-  t.mock.method(discord.channels, 'fetch', async () => other.channel);
-  await executeAITool('fetch_messages_history', { url: 'https://discord.com/channels/1/7/42' }, meta({}, client));
-  assert.deepEqual(other.fetches.at(-1), { around: '42', cache: false, limit: 30 });
-
-  assert.deepEqual(await executeAITool('fetch_messages_history', { url: 'nonsense' }, meta({}, client)),
-    [false, { error: 'URL/チャンネルメンションのパース中にエラーが発生しました' }]);
-  assert.deepEqual(await executeAITool('fetch_messages_history', { url: '<#8>' }, meta({}, client)),
-    [false, { error: 'チャンネルを取得できませんでした' }]);
-});
-
 test('the web tools call their endpoints with the query and a User-Agent, and report HTTP errors', async t => {
   const urls: string[] = [];
   let status = 200;

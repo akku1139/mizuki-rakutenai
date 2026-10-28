@@ -128,54 +128,68 @@ const fetchMessage: AITool = {
 /// fetch_messages_history: 特定メッセージ周辺の履歴を取得
 
 const fetchMessagesHistory: AITool = {
-  description: 'Discordの特定メッセージ周辺のメッセージ履歴を取得します',
+  description: 'Discordのチャンネル履歴を取得します。anchor 未指定ならチャンネルの最新メッセージを起点にします。',
   parametersJsonSchema: {
     type: 'object',
     properties: {
-      url: { type: 'string', description: '起点のメッセージまたはチャンネルのURL、またはチャンネルメンション (デフォルトでは現在のチャンネルの最後のメッセージ)' },
-      limit: { type: 'number', description: '取得するメッセージの個数', default: 30 },
-      mode: {
+      channel: { type: 'string', description: 'チャンネルURLまたは <#id>。未指定なら現在のチャンネル' },
+      anchor: { type: 'string', description: '起点メッセージのURLまたはID。未指定ならチャンネルの最新メッセージ' },
+      direction: {
         type: 'string',
-        enum: ['after', 'before', 'around'],
-        description: 'メッセージ取得モード。指定したメッセージから (after: 新しい, before: 古い, around: 周辺) を取得します。',
-        default: 'around',
+        enum: ['before', 'after', 'around'],
+        description: '取得方向。before: 古い, after: 新しい, around: 周辺。既定 before',
       },
+      limit: { type: 'number', description: '取得するメッセージ数 (1-100, 既定 30)' },
     },
   },
-  async execute({ url, limit, mode }, { msg }) {
+  async execute({ channel: channelArg, anchor, direction, limit }, { msg }) {
     try {
-      let channel = msg.channel as unknown as HistoryChannel;
-      let targetMessageID: string | undefined = msg.id;
-      if (url !== undefined && url !== '') {
-        const mention = /<#(\d+)>/.exec(String(url));
-        const parsed = parseMessageUrl(String(url));
+      let ch = msg.channel as unknown as HistoryChannel;
+      if (channelArg !== undefined && channelArg !== '') {
+        const mention = /<#(\d+)>/.exec(String(channelArg));
+        const parsed = parseMessageUrl(String(channelArg));
         if (mention?.[1]) {
-          targetMessageID = undefined;
           const fetched = await msg.client.channels.fetch(mention[1]);
           if (!fetched?.isTextBased()) return [false, { error: 'チャンネルを取得できませんでした' }];
-          channel = fetched as unknown as HistoryChannel;
-        } else if (parsed) {
-          const client = clientForUrl(String(url), msg.client as Client<boolean>);
-          targetMessageID = parsed.messageId;
+          ch = fetched as unknown as HistoryChannel;
+        } else if (parsed?.channelId) {
+          const client = clientForUrl(String(channelArg), msg.client as Client<boolean>);
           const fetched = await client.channels.fetch(parsed.channelId);
           if (!fetched?.isTextBased()) return [false, { error: 'チャンネルを取得できませんでした' }];
-          channel = fetched as unknown as HistoryChannel;
+          ch = fetched as unknown as HistoryChannel;
         } else {
-          return [false, { error: 'URL/チャンネルメンションのパース中にエラーが発生しました' }];
+          return [false, { error: 'チャンネルのパースに失敗しました' }];
         }
       }
-      const messages = await channel.messages.fetch({
-        ...{ [mode === 'after' || mode === 'before' ? mode : 'around']: targetMessageID },
-        cache: false,
-        limit: typeof limit === 'number' ? Math.min(Math.max(limit, 1), 100) : 30,
-      } as Parameters<typeof channel.messages.fetch>[0]);
+
+      const dir = direction === 'after' || direction === 'around' ? direction : 'before';
+      const lim = typeof limit === 'number' ? Math.min(Math.max(Math.trunc(limit), 1), 100) : 30;
+
+      let anchorId: string | undefined;
+      if (anchor !== undefined && anchor !== '') {
+        const parsed = parseMessageUrl(String(anchor));
+        anchorId = parsed?.messageId ?? String(anchor);
+      } else {
+        const latest = await ch.messages.fetch({ limit: 1 });
+        anchorId = [...latest.values()][0]?.id;
+      }
+
+      const fetchOpts: Record<string, unknown> = { cache: false, limit: lim };
+      if (anchorId) fetchOpts[dir === 'after' ? 'after' : dir === 'before' ? 'before' : 'around'] = anchorId;
+
+      const messages = await ch.messages.fetch(fetchOpts as Parameters<typeof ch.messages.fetch>[0]);
+      const items = await Promise.all([...messages.values()].map(async m => ({
+        id: m.id,
+        ...(await messageToAISchema(m)),
+      })));
+      items.sort((a: any, b: any) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+
       return [true, {
-        ...(await Promise.all([...messages.values()].map(async m => [m.id, await messageToAISchema(m)]))
-          .then(entries => Object.fromEntries(entries))),
-        channel: {
-          id: channel.id,
-          name: (channel as unknown as { name?: string }).name,
-        },
+        channel: { id: ch.id, name: ch.name },
+        anchor: anchorId,
+        direction: dir,
+        count: items.length,
+        messages: items,
       }];
     } catch (err) {
       return [false, errText(err)];
