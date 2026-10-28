@@ -22,7 +22,8 @@ import { embedImageUrls } from './embeds.ts';
 import { OpenAICompatChat } from './openai.ts';
 import { getUserProvider, loadPrefs, setUserProvider } from './prefs.ts';
 import { buildSystemPrompt } from './prompt.ts';
-import { aitoolsSpec } from './tools.ts';
+import { getAitoolsSpec, refreshMcpTools } from './tools.ts';
+import { connectAllMcp } from './mcp-registry.ts';
 import type { AIEvent, ChatContents, ChatSession, ProviderName } from './types.ts';
 import { isProviderName, PROVIDERS } from './types.ts';
 
@@ -110,7 +111,7 @@ export const createChatSession = async (
         apiKey: profile.apiKey ?? get(config, 'ai.openaiProfiles.openai.apiKey', process.env['OPENAI_API_KEY'] ?? ''),
         model: profile.model ?? get(config, 'ai.openaiProfiles.openai.model', process.env['OPENAI_MODEL'] ?? 'gpt-4o-mini'),
       },
-      aitoolsSpec,
+      getAitoolsSpec(),
     );
     if (meta?.guildName !== undefined && meta.channelName !== undefined) {
       chat.setServerContext(meta.guildName, meta.channelName);
@@ -421,8 +422,14 @@ export const getAIStatus = (): { waiting: number, processing: number, sessions: 
   sessions: Array.from(chatStore.entries()).map(([k, v]) => ({ key: k, provider: v.provider, label: v.t.label })),
 });
 
-export const setupAI = (): void => {
+export const setupAI = async (): Promise<void> => {
   discord.on('messageCreate', aiHandler);
   fluxer.on('messageCreate', aiHandler);
   void loadPrefs();
+  try {
+    await connectAllMcp();
+    refreshMcpTools();
+  } catch (e) {
+    error('mcp setup failed:', e);
+  }
 };

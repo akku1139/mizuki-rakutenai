@@ -13,6 +13,8 @@ import {
 } from 'discord.js';
 import process from 'node:process';
 import { discord, fluxer } from '../clients.ts';
+import { callMcpTool, getMcpTools } from './mcp-registry.ts';
+import { flattenToolName } from './mcp.ts';
 import { config, get } from '../config.ts';
 import { describeEmbed, describeMessage } from './embeds.ts';
 import type { ToolSpec } from './types.ts';
@@ -343,7 +345,7 @@ const searchWeb: AITool = {
 };
 
 /** 利用可能なツール一覧。エンドポイント系は環境変数が設定されている場合のみ含める */
-export const aitools: Record<string, AITool> = {
+export let aitools: Record<string, AITool> = {
   fetch_message: fetchMessage,
   fetch_messages_history: fetchMessagesHistory,
   wikipedia_search: wikipediaSearch,
@@ -396,8 +398,28 @@ export const executeAITool = async (
   return tool.execute(args, meta);
 };
 
-/** ChatSessionへ渡すToolSpec */
-export const aitoolsSpec: ToolSpec = {
+/** MCP ツールを aitools に反映する */
+export const refreshMcpTools = (): void => {
+  // 既存の MCP エントリを除去
+  for (const k of Object.keys(aitools)) {
+    if (k.startsWith('mcp__')) delete aitools[k];
+  }
+  for (const t of getMcpTools()) {
+    const flat = flattenToolName(t.server, t.name);
+    aitools[flat] = {
+      description: t.description,
+      parametersJsonSchema: t.inputSchema,
+      async execute(args) {
+        const r = await callMcpTool(flat, args);
+        if (r === null) return [false, { error: 'mcp tool not found' }];
+        return [r.ok, r.text] as AIToolResult;
+      },
+    };
+  }
+};
+
+/** ChatSessionへ渡すToolSpec (呼び出し時に最新の aitools を使う) */
+export const getAitoolsSpec = (): ToolSpec => ({
   definitions: toOpenAITools(),
   execute: executeAITool,
-};
+});

@@ -10,7 +10,22 @@ export interface OpenAIProfile {
   model?: string;
 }
 
+export interface McpServerConfig {
+  name: string;
+  description?: string;
+  url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  headers?: Record<string, string>;
+  transport?: 'http' | 'sse' | 'stdio';
+  enabled?: boolean;
+  timeoutMs?: number;
+}
+
 export interface Config {
+  mcpServers?: McpServerConfig[];
   discord?: {
     token?: string;
     logWebhookUrl?: string;
