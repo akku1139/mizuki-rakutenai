@@ -117,15 +117,19 @@ export const setupAdmin = (): void => {
     return;
   }
   if (parsed.pathname === '/api/channels' && req.method === 'GET') {
-    const out: Array<{ id: string, name: string, platform: string, blacklisted: boolean }> = [];
+    const out: Array<{ id: string, name: string, platform: string, position?: number, blacklisted: boolean }> = [];
     for (const [client, platform] of [[discord, 'discord'], [fluxer, 'fluxer']] as const) {
       for (const g of client.guilds.cache.values()) {
-        for (const c of g.channels.cache.values()) {
-          if (!c.isTextBased()) continue;
-          out.push({ id: c.id, name: `${g.name} / ${c.name}`, platform, blacklisted: (config.blacklistedChannels ?? []).includes(c.id) || (!!c.parentId && (config.blacklistedChannels ?? []).includes(c.parentId)) });
+        const cats = new Map((g.channels.cache.filter((c: any) => c.type === 4).map((c: any) => [c.id, c.name])));
+        const channels = [...g.channels.cache.values()]
+          .filter((c: any) => c.isTextBased && c.isTextBased())
+          .sort((a: any, b: any) => (a.rawPosition ?? a.position ?? 0) - (b.rawPosition ?? b.position ?? 0));
+        for (const c of channels) {
+          const cat = c.parentId ? cats.get(c.parentId) : undefined;
+          out.push({ id: c.id, name: `${g.name} / ${cat ? cat + ' / ' : ''}${c.name}`, platform, position: (c as any).rawPosition ?? (c as any).position ?? 0, blacklisted: (config.blacklistedChannels ?? []).includes(c.id) || (!!c.parentId && (config.blacklistedChannels ?? []).includes(c.parentId)) });
         }
         for (const t of (g as any).threads?.cache?.values?.() ?? []) {
-          out.push({ id: t.id, name: `${g.name} / #${t.parent?.name ?? '?'} / ${t.name}`, platform, blacklisted: (config.blacklistedChannels ?? []).includes(t.id) || (!!t.parentId && (config.blacklistedChannels ?? []).includes(t.parentId)) });
+          out.push({ id: t.id, name: `${g.name} / #${t.parent?.name ?? '?'} / ${t.name}`, platform, position: (t as any).rawPosition ?? 0, blacklisted: (config.blacklistedChannels ?? []).includes(t.id) || (!!t.parentId && (config.blacklistedChannels ?? []).includes(t.parentId)) });
         }
       }
     }
