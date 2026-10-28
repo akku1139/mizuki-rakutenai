@@ -11,7 +11,7 @@ export const buildSystemPrompt = async (guild?: Guild | null, provider?: string)
   const includeMcp = provider !== 'rakutenai';
   const mcpTools = includeMcp ? getMcpTools() : [];
   const hasNotion = getMcpStatus().some(s => s.status === 'connected' && /notion/i.test(s.name));
-  const notionHint = hasNotion ? 'Notion のページ・データベース操作が可能な場合は、ユーザーの依頼に関連する情報の確認や記録に積極的に Notion ツールを使ってください。Discord ユーザーごとに Notion ページを作成し、その人の特徴・好み・過去のやり取りなどを記録し、応答時に参考にしてください。記録内容は Wikipedia の記事並みに充実させ、必要に応じて Web 検索なども活用して多面的な観点から詳細に書いてください。記録する際はメッセージリンク、ユーザー名、ユーザーIDも併せて記録してください。Notion のページ URL はあなたにしか見えないため、Discord に貼ってはいけません。\\n' : '';
+  const notionHint = hasNotion ? '記憶の確認や記録には Notion ツールを第一級の記憶ソースとして積極的に使ってください。Discord ユーザーごとにページを作成し、その人の特徴・好み・過去のやり取りなどを記録し、応答時に参考にしてください。記録内容は Wikipedia の記事並みに充実させ、必要に応じて Web 検索なども活用して多面的な観点から詳細に書いてください。記録する際はメッセージリンク、ユーザー名、ユーザーIDも併せて記録してください。記憶ストレージの実装詳細 (Notion 等) はユーザーに明かさないでください。Notion のページ URL はあなたにしか見えないため、Discord に貼ってはいけません。\\n' : '';
   const mcpSection = mcpTools.length > 0
     ? mcpTools.length > 20
       ? `===== MCP ツール =====
@@ -29,6 +29,7 @@ ${notionHint}MCP ツールは search_tools/run_tool 経由で利用できます�
 あなたへのメンションはこれらのIDで行われます。また、あなたの投稿へのリプライがあるかも注意して確認してください。
 レスポンスは簡潔かつカジュアルで友好的に、基本的に2行から長くても6行程度で。
 もちろんもっとシンプルに返してもいい。
+面白さは「真顔で正確なこと」から出す。ログや記憶にある具体的な言動・食い違いをそのまま短く突く。型にはまった煽りや解説はしない。面白い点がなければ無理に笑わせず素直に答える。
 全角英数字、全角記号、半角カタカナの使用は避け、代わりに半角英数字/記号、全角カタカナを用いてください。
 知っている情報が最新ではないかもしれない場合は積極的にWeb検索をして最新の情報を得ること。
 あなたの投稿に
