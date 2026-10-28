@@ -14,19 +14,18 @@ const say = async (chat: OpenAICompatChat, text: string) => {
   for await (const _event of chat.sendMessage({ contents: [{ type: 'text', text }] })) { /* drain */ }
 };
 
-test('trimming the history never starts in the middle of a tool exchange', async t => {
+test('a heavy tool turn keeps the previous one in the history', async t => {
   const bodies: Body[] = [];
   t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
     bodies.push(JSON.parse(String(init.body)));
-    // 最初の発言だけツールを使い、履歴に assistant(tool_calls) と tool を積む
     return bodies.length === 1 ? toolCall() : sse({ content: 'ok' });
   });
   const chat = new OpenAICompatChat({ baseUrl: 'https://unused.invalid/v1', apiKey: 'test', model: 'test' }, tools);
   for (let i = 0; i < 45; i++) await say(chat, `turn ${i}`);
-  for (const body of bodies) assert.equal(body.messages[0]?.role, 'user');
+  assert.ok(bodies.at(-1)!.messages.some(m => m.content === 'turn 0'), '古いターンが消えている');
 });
 
-test('an empty reply after a tool call rolls back the whole turn', async t => {
+test('an empty reply after a tool call keeps the tool exchange', async t => {
   const bodies: Body[] = [];
   t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
     bodies.push(JSON.parse(String(init.body)));
@@ -37,5 +36,23 @@ test('an empty reply after a tool call rolls back the whole turn', async t => {
   const chat = new OpenAICompatChat({ baseUrl: 'https://unused.invalid/v1', apiKey: 'test', model: 'test' }, tools);
   await say(chat, 'first');
   await say(chat, 'second');
-  assert.deepEqual(bodies[2]?.messages, [{ role: 'user', content: 'second' }]);
+  // ツールを実行したターンは残す (消すと次のリクエストで「何を調べたか」を失う)
+  assert.deepEqual(bodies[2]?.messages.slice(0, 3), [
+    { role: 'user', content: 'first' },
+    { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{}' } }] },
+    { role: 'tool', content: '{"result":"found"}', tool_call_id: 'call_1' },
+  ]);
+  assert.deepEqual(bodies[2]?.messages.at(-1), { role: 'user', content: 'second' });
+});
+
+test('an empty reply with no tool call still rolls the turn back', async t => {
+  const bodies: Body[] = [];
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
+    bodies.push(JSON.parse(String(init.body)));
+    return bodies.length === 1 ? sse({}) : sse({ content: 'ok' });
+  });
+  const chat = new OpenAICompatChat({ baseUrl: 'https://unused.invalid/v1', apiKey: 'test', model: 'test' }, tools);
+  await say(chat, 'first');
+  await say(chat, 'second');
+  assert.deepEqual(bodies[1]?.messages, [{ role: 'user', content: 'second' }]);
 });

@@ -8,6 +8,8 @@ export interface OpenAIProfile {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  /** コンテキストウィンドウ (トークン)。auto-compact の予算はこの 75% */
+  contextWindowTokens?: number;
 }
 
 export interface McpServerConfig {
@@ -46,6 +48,8 @@ export interface Config {
     defaultProvider?: string;
     openaiProfiles?: Record<string, OpenAIProfile>;
     activeOpenaiProfile?: string | null;
+    /** コンテキストウィンドウ (トークン)。auto-compact の予算はこの 75%。未設定なら 128k */
+    contextWindowTokens?: number;
     readabilityEndpoint?: string | null;
     searchEndpoint?: string | null;
   };

@@ -82,10 +82,17 @@ docs/             機能ごとの仕様 (ai.md が AI の一次資料)
 - **reasoning** は OpenAI 公式のスキーマに無いフィールドです。`reasoning_content` (DeepSeek 系) と
   `reasoning` (OpenRouter) の両方を読み、`reasoning-start` → `reasoning-delta` として流します。
   返信本文には入れませんが、プロバイダが要求する場合は会話履歴の assistant メッセージに
-  `reasoning_content` / `reasoning` として再送します (思考過程が無いターンは空文字)。
+  `reasoning_content` / `reasoning` として再送します。思考過程の無いターンはフィールドごと
+  省きます (空文字は未知の引数として 400 になるプロバイダがある)。
 - **会話履歴の不変条件** (`src/ai/openai.ts`): 履歴の先頭は必ず `user` メッセージ。
-  ツール呼び出しとその結果の間で切らない。API エラー・ストリーム中断・空応答のときは
-  `#historyBeforeTurn` まで巻き戻す。`tests/openai-history.test.ts` が守っています。
+  ツール呼び出しとその結果の間で切らない (`assistant` の `tool_calls` には必ず対応する `tool`
+  メッセージを積む。ツールが例外を投げてもエラーを `tool` 本文にして積む)。
+  ツールが何もしていないターンが空応答で終わったときだけ `#historyBeforeTurn` まで巻き戻す。
+  `tests/openai-history.test.ts` と `tests/openai-tool-history.test.ts` が守っています。
+- **履歴はトークン数で auto-compact する** (`src/ai/compact.ts`)。コンテキストウィンドウの
+  75% で古い方を要約 1 通に置き換え、直近 15,000 トークンは生で残します。件数で切る旧実装は
+  廃止しました (ツールを多用する 1 ターンで 80 メッセージを超え、前のターンが丸ごと消えるため)。
+  切れ目が `tool_calls` と `tool` の間にならないよう `safeCutPoint` を通すこと。
 - **docs が仕様書です**。`docs/ai.md` にはプロバイダの違い、文脈の組み立て、添付ファイルの扱い、
   ツール一覧、429 対策が書いてあります。コードを読む前にここを読むのが速いです。
 - ハードコードされたサーバー ID・チャンネル ID・ロール ID が多数あります

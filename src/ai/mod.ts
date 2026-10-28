@@ -110,6 +110,7 @@ export const createChatSession = async (
         baseUrl: profile.baseUrl ?? get(config, 'ai.openaiProfiles.openai.baseUrl', process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1'),
         apiKey: profile.apiKey ?? get(config, 'ai.openaiProfiles.openai.apiKey', process.env['OPENAI_API_KEY'] ?? ''),
         model: profile.model ?? get(config, 'ai.openaiProfiles.openai.model', process.env['OPENAI_MODEL'] ?? 'gpt-4o-mini'),
+        contextWindowTokens: profile.contextWindowTokens ?? get(config, 'ai.contextWindowTokens', undefined),
       },
       getAitoolsSpec(),
     );

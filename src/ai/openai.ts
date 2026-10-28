@@ -7,6 +7,10 @@ import { log, info, warn, error } from '../log.ts';
 
 import type { AIEvent, ChatContents, ChatFile, ChatSession, ToolSpec } from './types.ts';
 import OpenAI, { APIError } from 'openai';
+import {
+  COMPACT_INSTRUCTION, COMPACT_UPDATE_INSTRUCTION, contextTokens, droppedMessage, estimateTokens,
+  safeCutPoint, stripAnalysis, summaryMessage, type History,
+} from './compact.ts';
 import { fetchWithRateLimitRetry } from './ratelimit.ts';
 
 export interface OpenAICompatConfig {
@@ -15,9 +19,18 @@ export interface OpenAICompatConfig {
   apiKey: string,
   /** 例: gpt-4o-mini */
   model: string,
+  /** コンテキストウィンドウ (トークン)。auto-compact の予算はこの 75%。未指定なら 128k */
+  contextWindowTokens?: number,
 }
 
-const MAX_HISTORY = 40; // 保持するやり取りの上限 (system除く)
+/** コンテキストウィンドウが分からないときの想定値 */
+const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
+/** この割合まで使ったら auto-compact する */
+const COMPACT_AT_SHARE = 0.75;
+/** compact のあと、生のまま残す直近のトークン数 */
+const KEEP_RECENT_TOKENS = 15_000;
+/** 要約に連続で失敗したら、自動 compact を諦める (毎ターン無駄な呼び出しをしない) */
+const MAX_COMPACT_FAILURES = 3;
 // ツール実行の再生成上限は撤廃 (モデルが tool_calls を返し続ける限りループする)
 const MAX_TEXT_ATTACHMENT_CHARS = 20_000;
 
@@ -73,12 +86,20 @@ export class OpenAICompatChat implements ChatSession {
   readonly #config: OpenAICompatConfig;
   readonly #client: OpenAI;
   #systemPrompt: string = '';
-  #history: Array<OpenAI.Chat.ChatCompletionMessageParam & { reasoning?: string }> = [];
+  #history: History = [];
   /** 今回の発言を始める前の履歴。失敗や空応答のときはここまで戻す */
-  #historyBeforeTurn: Array<OpenAI.Chat.ChatCompletionMessageParam & { reasoning?: string }> = [];
+  #historyBeforeTurn: History = [];
   readonly #tools?: ToolSpec;
   /** 思考過程を再送するときのフィールド名 (OpenRouter は reasoning、それ以外は reasoning_content) */
   readonly #reasoningKey: 'reasoning' | 'reasoning_content';
+  /** API が返した直近の入力トークン数 (auto-compact の判断に使う) */
+  #lastInputTokens: number | undefined;
+  /** 直近の要約。次の compact はこれを更新する */
+  #lastSummary: string | undefined;
+  /** 要約に連続で失敗した回数 */
+  #compactFailures = 0;
+  /** 最後に compact したあとの履歴の長さ (無進捗での再 compact を避ける) */
+  #compactedAtLen = 0;
 
   constructor(config: OpenAICompatConfig, tools?: ToolSpec) {
     this.#config = config;
@@ -116,12 +137,17 @@ export class OpenAICompatChat implements ChatSession {
     this.#systemPrompt += `\nあなたが参加してるサーバーは "${guildName}"、チャンネルは "${channelName}" です。`;
   }
 
-  /** assistant メッセージの思考過程を、プロバイダが要求するフィールド名で再送する */
+  /**
+   * assistant メッセージの思考過程を、プロバイダが要求するフィールド名で再送する。
+   * 思考過程が無かったターンはフィールドごと省く (空文字を送ると、そのフィールドを
+   * 知らないプロバイダ (OpenAI 公式など) では未知の引数として 400 になる)。
+   */
   #withReasoning(m: OpenAI.Chat.ChatCompletionMessageParam): OpenAI.Chat.ChatCompletionMessageParam {
     if (m.role !== 'assistant') return m;
     const r = (m as { reasoning?: unknown }).reasoning;
     const { reasoning: _r, ...rest } = m as unknown as Record<string, unknown>;
-    return { ...rest, [this.#reasoningKey]: typeof r === 'string' ? r : '' } as unknown as OpenAI.Chat.ChatCompletionMessageParam;
+    if (typeof r !== 'string' || r === '') return rest as unknown as OpenAI.Chat.ChatCompletionMessageParam;
+    return { ...rest, [this.#reasoningKey]: r } as unknown as OpenAI.Chat.ChatCompletionMessageParam;
   }
 
   async uploadFile(opts: { file: File, isImage?: boolean }): Promise<ChatFile> {
@@ -174,11 +200,6 @@ export class OpenAICompatChat implements ChatSession {
   async *#agentLoop(userContent: string | Array<OpenAI.Chat.ChatCompletionContentPart>, meta: unknown): AsyncGenerator<AIEvent> {
     this.#historyBeforeTurn = [...this.#history];
     this.#history.push({ role: 'user', content: userContent });
-    if (this.#history.length > MAX_HISTORY * 2) {
-      // ツール呼び出しとその結果の間で切らないよう、先頭をuserメッセージに揃える
-      const trimmed = this.#history.slice(-MAX_HISTORY * 2);
-      this.#history = trimmed.slice(trimmed.findIndex(m => m.role === 'user'));
-    }
 
     while (true) {
       let sawToolCall = false;
@@ -193,8 +214,99 @@ export class OpenAICompatChat implements ChatSession {
     }
   }
 
+  /** auto-compact の予算 (トークン)。contextWindowTokens の 75% */
+  #contextBudget(): number {
+    const window = this.#config.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
+    if (!Number.isFinite(window) || window <= 0) return 0;
+    return Math.round(window * COMPACT_AT_SHARE);
+  }
+
+  /**
+   * コンテキストが予算を超えていたら、古い方を要約 1 通に置き換える。
+   * 要約に失敗したら古い方を捨てる (リクエストは通すが、文脈は失われる)。
+   * 連続で失敗したら、そのセッションでは自動 compact を諦める。
+   */
+  async #maybeCompact(): Promise<void> {
+    const budget = this.#contextBudget();
+    if (budget <= 0) return;
+    if (this.#compactFailures >= MAX_COMPACT_FAILURES) return;
+    if (this.#history.length <= this.#compactedAtLen) return;
+
+    const before = contextTokens(this.#history, this.#lastInputTokens);
+    if (before < budget) return;
+
+    // 直近を生のまま残す位置を後ろから探す
+    const keepTokens = Math.min(KEEP_RECENT_TOKENS, Math.max(1, Math.floor(budget / 4)));
+    let cut = -1;
+    let kept = 0;
+    for (let i = this.#history.length - 1; i >= 1; i--) {
+      kept += estimateTokens([this.#history[i]!]);
+      if (kept > keepTokens) break;
+      cut = i;
+    }
+    // 直近の 1 通だけで予算を使い切るような巨大なメッセージでも、必ず前進させる
+    if (cut < 1) cut = this.#history.length - 1;
+    cut = safeCutPoint(this.#history, cut);
+    if (cut <= 0) return;
+
+    const old = this.#history.slice(0, cut);
+    let summary = '';
+    try {
+      summary = stripAnalysis(await this.#summarize(old));
+    } catch (err) {
+      this.#compactFailures += 1;
+      log('compact: summarize failed, dropping the old part instead:', err instanceof Error ? err.message : err);
+    }
+
+    if (summary !== '') {
+      this.#lastSummary = summary;
+      this.#compactFailures = 0;
+      this.#history = [
+        { role: 'user', content: summaryMessage(summary, old.length) },
+        ...this.#history.slice(cut),
+      ];
+    } else {
+      // 要約できなかった。捨てる量を半分にして、リクエストが通る形だけ作る
+      const halfCut = safeCutPoint(this.#history, Math.max(1, Math.floor(cut / 2)));
+      if (halfCut <= 0) return;
+      this.#history = [
+        { role: 'user', content: droppedMessage(halfCut) },
+        ...this.#history.slice(halfCut),
+      ];
+    }
+
+    // compact は履歴の書き換えなので、失敗時の巻き戻し先も今の履歴に付け替える
+    this.#historyBeforeTurn = [...this.#history];
+    this.#compactedAtLen = this.#history.length;
+    this.#lastInputTokens = undefined;
+    log(`compact: ${old.length} 件を${summary === '' ? '破棄' : '要約'} (${before} → ${contextTokens(this.#history)})`);
+  }
+
+  /** 古い履歴を 1 通のメモに圧縮する。前回のメモがあれば更新させる */
+  async #summarize(old: History): Promise<string> {
+    const previous = this.#lastSummary;
+    const response = await this.#client.chat.completions.create({
+      model: this.#config.model,
+      messages: [
+        ...(this.#systemPrompt ? [{ role: 'system' as const, content: this.#systemPrompt }] : []),
+        ...old.map(m => this.#withReasoning(m)),
+        {
+          role: 'user' as const,
+          content: (previous !== undefined ? `<conversation_checkpoint>\n${previous}\n</conversation_checkpoint>\n\n` : '')
+            + COMPACT_INSTRUCTION
+            + (previous !== undefined ? COMPACT_UPDATE_INSTRUCTION : ''),
+        },
+      ],
+      stream: false,
+    }, { timeout: 120_000 });
+    return response.choices?.[0]?.message?.content ?? '';
+  }
+
   /** 1回分の chat/completions をストリーミング実行し、必要ならツールを実行する */
   async *#complete(meta: unknown): AsyncGenerator<AIEvent> {
+    // ツールを大量に呼ぶターンは 1 回で窓を食い潰すので、毎リクエストの前に見る
+    await this.#maybeCompact();
+
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       ...(this.#systemPrompt ? [{ role: 'system' as const, content: this.#systemPrompt }] : []),
       ...this.#history.map(m => this.#withReasoning(m)),
@@ -276,6 +388,7 @@ export class OpenAICompatChat implements ChatSession {
 
         const usage = chunk.usage;
         if (usage != null) {
+          this.#lastInputTokens = usage.prompt_tokens ?? undefined;
           usageEvent = {
             type: 'usage',
             usage: {
@@ -333,9 +446,16 @@ export class OpenAICompatChat implements ChatSession {
           data: { name: c.name, description: explain ?? '', groupId: this.id },
         };
 
-        const result = this.#tools !== undefined && this.#tools.execute !== undefined
-          ? await this.#tools.execute(c.name, args, meta)
-          : [false, { error: 'ツールが利用できません' }] as const;
+        let result: [true, unknown] | [false, { error: string }];
+        try {
+          result = this.#tools !== undefined && this.#tools.execute !== undefined
+            ? await this.#tools.execute(c.name, args, meta)
+            : [false, { error: 'ツールが利用できません' }] as const;
+        } catch (err) {
+          // 例外をここで止める。外に漏らすと assistant(tool_calls) だけが履歴に残り、
+          // 以降のリクエストが「tool の応答が無い」で 400 になる
+          result = [false, { error: err instanceof Error ? err.message : String(err) }];
+        }
 
         yield {
           type: 'tool-result',
@@ -344,7 +464,8 @@ export class OpenAICompatChat implements ChatSession {
 
         this.#history.push({
           role: 'tool',
-          content: JSON.stringify(result[1]),
+          // JSON.stringify(undefined) は undefined になり、content の無い tool メッセージになる
+          content: JSON.stringify(result[1]) ?? 'null',
           tool_call_id: c.id,
         });
       }
@@ -358,8 +479,10 @@ export class OpenAICompatChat implements ChatSession {
     } else if (text.trim() !== '') {
       this.#history.push({ role: 'assistant', content: text, reasoning: reasoning || undefined });
     } else {
-      // 空応答: 履歴を汚さないよう、今回の発言 (ツールの実行結果を含む) ごと戻す
-      this.#history = this.#historyBeforeTurn;
+      // 空応答。ツールを実行したターンは、その呼び出しと結果を残す (次のリクエストで
+      // モデルが「何を調べたか」を失う)。何も起きていないターンだけ巻き戻す
+      const ranTool = this.#history.slice(this.#historyBeforeTurn.length + 1).some(m => m.role === 'tool');
+      if (!ranTool) this.#history = this.#historyBeforeTurn;
     }
 
     if (usageEvent !== undefined) yield usageEvent;
