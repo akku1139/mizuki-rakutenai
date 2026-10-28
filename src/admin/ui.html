@@ -42,13 +42,17 @@ th{color:var(--accent)}
 <dt>url</dt><dd><input id="m_url"></dd>
 <dt>command</dt><dd><input id="m_cmd"></dd>
 <dt>transport</dt><dd><select id="m_tr"><option>http</option><option>sse</option><option>stdio</option></select></dd>
+<dt>headers (JSON)</dt><dd><textarea id="m_headers" rows="3" style="width:100%"></textarea></dd>
 </div><button onclick="addMcp()">追加</button></div></section>
 <section id="channels" hidden><div class="card"><h3>チャンネル一覧</h3><table id="channelsTable"><tr><th>プラットフォーム</th><th>チャンネル</th><th>ブラックリスト</th></tr></table></div></section>
 </main>
 <script>
 const tabs=document.querySelectorAll('nav button');
 const sections=document.querySelectorAll('main section');
-tabs.forEach(b=>b.addEventListener('click',()=>{tabs.forEach(x=>x.classList.remove('active'));b.classList.add('active');sections.forEach(s=>s.hidden=s.id!==b.dataset.tab);}));
+function showTab(name){if(!name)name='status';tabs.forEach(x=>x.classList.toggle('active',x.dataset.tab===name));sections.forEach(s=>s.hidden=s.id!==name);if(location.hash!=='#'+name)location.hash=name;}
+tabs.forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.tab)));
+window.addEventListener('hashchange',()=>showTab((location.hash||'').replace('#','')));
+showTab((location.hash||'').replace('#',''));
 async function api(p){const r=await fetch(p,{headers:{'Authorization':'Bearer '+ (localStorage.token||'')}});return r.json();}
 function row(t,cells){const tr=document.createElement('tr');cells.forEach(c=>{const td=document.createElement('td');td.textContent=c;tr.appendChild(td);});t.appendChild(tr);}
 async function refresh(){
@@ -68,7 +72,7 @@ const cb=document.createElement('button');cb.textContent='接続';cb.onclick=()=
 if(x.oauthRequired){const ob=document.createElement('button');ob.textContent='認証';ob.onclick=async()=>{const r=await fetch('/api/mcp/oauth',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify({name:x.name})});const j=await r.json();if(j.url)window.open(j.url,'_blank');};td.appendChild(ob);}
 tr.appendChild(td);mct.appendChild(tr);});
 }
-async function addMcp(){const cfg={name:document.getElementById('m_name').value,url:document.getElementById('m_url').value||undefined,command:document.getElementById('m_cmd').value||undefined,transport:document.getElementById('m_tr').value};await fetch('/api/mcp',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify(cfg)});refresh();}
+async function addMcp(){let headers;try{const v=document.getElementById('m_headers').value.trim();if(v)headers=JSON.parse(v);}catch(e){alert('headers JSON invalid');return;}const cfg={name:document.getElementById('m_name').value,url:document.getElementById('m_url').value||undefined,command:document.getElementById('m_cmd').value||undefined,transport:document.getElementById('m_tr').value,headers};await fetch('/api/mcp',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify(cfg)});refresh();}
 async function connectMcp(name){await fetch('/api/mcp/connect',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify({name})});refresh();}
 refresh();setInterval(refresh,5000);
 </script>
