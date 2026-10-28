@@ -37,13 +37,13 @@ th{color:var(--accent)}
 <section id="sync" hidden><div class="card"><h3>同期ペア</h3><table id="syncs"><tr><th>Discord ch</th><th>Fluxer ch</th></tr></table></div></section>
 <section id="ai" hidden><div class="card"><h3>ユーザー別プロバイダ</h3><table id="prefs"><tr><th>ユーザー ID</th><th>プロバイダ</th></tr></table></div></section>
 <section id="logs" hidden><div class="card"><h3>ログ</h3><div class="logs" id="logbox"></div></div></section>
-<section id="mcp" hidden><div class="card"><h3>MCP サーバー</h3><table id="mcps"><tr><th>名前</th><th>状態</th><th>ツール数</th><th>操作</th></tr></table></div><div class="card"><h3>追加</h3><div class="kv">
+<section id="mcp" hidden><div class="card"><h3>MCP サーバー</h3><table id="mcps"><tr><th>名前</th><th>状態</th><th>ツール数</th><th>操作</th></tr></table></div><div class="card"><h3>追加 / 編集</h3><div class="kv">
 <dt>name</dt><dd><input id="m_name"></dd>
 <dt>url</dt><dd><input id="m_url"></dd>
 <dt>command</dt><dd><input id="m_cmd"></dd>
 <dt>transport</dt><dd><select id="m_tr"><option>http</option><option>sse</option><option>stdio</option></select></dd>
 <dt>headers (JSON)</dt><dd><textarea id="m_headers" rows="3" style="width:100%"></textarea></dd>
-</div><button onclick="addMcp()">追加</button></div></section>
+</div><button id="m_submit" onclick="addMcp()">追加</button> <button onclick="resetMcpForm()">クリア</button></div></section>
 <section id="channels" hidden><div class="card"><h3>チャンネル一覧</h3><table id="channelsTable"><tr><th>プラットフォーム</th><th>チャンネル</th><th>ブラックリスト</th></tr></table></div></section>
 </main>
 <script>
@@ -70,11 +70,12 @@ async function refresh(){
   const mc=await api('/api/mcp');const mct=document.getElementById('mcps');mct.innerHTML='<tr><th>名前</th><th>状態</th><th>ツール数</th><th>操作</th></tr>';mc.forEach(x=>{const tr=document.createElement('tr');[x.name,x.status,x.toolCount].forEach(c=>{const td=document.createElement('td');td.textContent=c;tr.appendChild(td);});const td=document.createElement('td');
 const cb=document.createElement('button');cb.textContent='接続';cb.onclick=()=>connectMcp(x.name);td.appendChild(cb);
 if(x.oauthRequired){const ob=document.createElement('button');ob.textContent='認証';ob.onclick=async()=>{const r=await fetch('/api/mcp/oauth',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify({name:x.name})});const j=await r.json();if(j.url)window.open(j.url,'_blank');};td.appendChild(ob);}
-const eb=document.createElement('button');eb.textContent='編集';eb.onclick=()=>{document.getElementById('m_name').value=x.name;document.getElementById('m_url').value=x.url||'';document.getElementById('m_cmd').value=x.command||'';document.getElementById('m_tr').value=x.transport||'http';document.getElementById('m_headers').value=x.headers?JSON.stringify(x.headers):'';};td.appendChild(eb);
+const eb=document.createElement('button');eb.textContent='編集';eb.onclick=()=>{document.getElementById('m_name').value=x.name;document.getElementById('m_url').value=x.url||'';document.getElementById('m_cmd').value=x.command||'';document.getElementById('m_tr').value=x.transport||'http';document.getElementById('m_headers').value=x.headers?JSON.stringify(x.headers):'';document.getElementById('m_submit').textContent='更新';document.getElementById('m_name').readOnly=true;};td.appendChild(eb);
 const db=document.createElement('button');db.textContent='削除';db.onclick=async()=>{await fetch('/api/mcp?name='+encodeURIComponent(x.name),{method:'DELETE',headers:{'Authorization':'Bearer '+(localStorage.token||'')}});refresh();};td.appendChild(db);
 tr.appendChild(td);mct.appendChild(tr);});
 }
-async function addMcp(){let headers;try{const v=document.getElementById('m_headers').value.trim();if(v)headers=JSON.parse(v);}catch(e){alert('headers JSON invalid');return;}const cfg={name:document.getElementById('m_name').value,url:document.getElementById('m_url').value||undefined,command:document.getElementById('m_cmd').value||undefined,transport:document.getElementById('m_tr').value,headers};await fetch('/api/mcp',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify(cfg)});refresh();}
+async function addMcp(){let headers;try{const v=document.getElementById('m_headers').value.trim();if(v)headers=JSON.parse(v);}catch(e){alert('headers JSON invalid');return;}const cfg={name:document.getElementById('m_name').value,url:document.getElementById('m_url').value||undefined,command:document.getElementById('m_cmd').value||undefined,transport:document.getElementById('m_tr').value,headers};await fetch('/api/mcp',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify(cfg)});resetMcpForm();refresh();}
+function resetMcpForm(){document.getElementById('m_name').value='';document.getElementById('m_name').readOnly=false;document.getElementById('m_url').value='';document.getElementById('m_cmd').value='';document.getElementById('m_tr').value='http';document.getElementById('m_headers').value='';document.getElementById('m_submit').textContent='追加';}
 async function connectMcp(name){await fetch('/api/mcp/connect',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify({name})});refresh();}
 refresh();setInterval(refresh,5000);
 </script>
