@@ -12,6 +12,7 @@ import {
 } from 'discord.js';
 import { type Thread, User } from '@evex/rakutenai';
 import process from 'node:process';
+import { config, get } from '../config.ts';
 import { DISCORD_USER_ID, discord, FLUXER_USER_ID, fluxer } from '../clients.ts';
 import { whMapFluxer } from '../fluxsync/state.ts';
 import { createFileFromUrl, getFileName, isEffectivelyEmpty, splitLongString } from '../utils.ts';
@@ -85,7 +86,7 @@ interface ChatEntry {
 
 /** 既定のプロバイダ (env: AI_PROVIDER、未指定なら rakutenai) */
 const defaultProvider = (): ProviderName => {
-  const v = process.env['AI_PROVIDER'] ?? 'rakutenai';
+  const v = get(config, 'ai.defaultProvider', process.env['AI_PROVIDER'] ?? 'rakutenai');
   return isProviderName(v) ? v : 'rakutenai';
 };
 
@@ -100,11 +101,13 @@ export const createChatSession = async (
   meta?: { guildName?: string, channelName?: string },
 ): Promise<ChatSession> => {
   if (provider === 'openai') {
+    const active = get(config, 'ai.activeOpenaiProfile', null);
+    const profile = active ? get(config, `ai.openaiProfiles.${active}`, {}) : {};
     const chat = new OpenAICompatChat(
       {
-        baseUrl: process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1',
-        apiKey: process.env['OPENAI_API_KEY'] ?? '',
-        model: process.env['OPENAI_MODEL'] ?? 'gpt-4o-mini',
+        baseUrl: profile.baseUrl ?? get(config, 'ai.openaiProfiles.openai.baseUrl', process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1'),
+        apiKey: profile.apiKey ?? get(config, 'ai.openaiProfiles.openai.apiKey', process.env['OPENAI_API_KEY'] ?? ''),
+        model: profile.model ?? get(config, 'ai.openaiProfiles.openai.model', process.env['OPENAI_MODEL'] ?? 'gpt-4o-mini'),
       },
       aitoolsSpec,
     );

@@ -5,6 +5,7 @@
 import { type SendableChannels } from 'discord.js';
 import { MexcWebsocketClient } from '../mexc.ts';
 import { discord } from './clients.ts';
+import { config, get } from './config.ts';
 
 let lastPrice: string = "0";
 let totalVolume: number = 0;
@@ -15,7 +16,7 @@ let lastTxCount: number = 0;
 let watch114514channel: SendableChannels;
 
 discord.on('clientReady', async (c) => {
-  const ch = await c.channels.fetch('1468910632119308289');
+  const ch = await c.channels.fetch(get(config, 'coinwatch.channelId', '1468910632119308289'));
   if(!ch || !ch.isSendable()) throw new Error('failed to get 114514 channel');
   watch114514channel = ch;
 });
@@ -70,6 +71,6 @@ setInterval(async () => {
 }, 30000); // 30000ms = 30秒
 
 export const setupCoinWatch = (): void => {
-  mexc.subscribe(['spot@public.aggre.deals.v3.api.pb@100ms@114514USDT']);
+  mexc.subscribe([`spot@public.aggre.deals.v3.api.pb@100ms@${get(config, 'coinwatch.symbol', '114514USDT')}`]);
   mexc.connect();
 };

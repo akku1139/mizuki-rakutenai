@@ -12,6 +12,7 @@ import {
 } from 'discord.js';
 import process from 'node:process';
 import { discord, fluxer } from '../clients.ts';
+import { config, get } from '../config.ts';
 import { describeEmbed, describeMessage } from './embeds.ts';
 import type { ToolSpec } from './types.ts';
 
@@ -32,7 +33,11 @@ export interface AITool {
 export const DEFAULT_UA = 'MizukiBot (https://github.com/akku1139/mizuki-rakutenai)';
 
 const getEnv = (key: string): string => {
-  const v = process.env[key];
+  const map: Record<string, string> = {
+    READABILITY_ENDPOINT: get(config, 'ai.readabilityEndpoint', process.env['READABILITY_ENDPOINT'] ?? ''),
+    SEARCH_ENDPOINT: get(config, 'ai.searchEndpoint', process.env['SEARCH_ENDPOINT'] ?? ''),
+  };
+  const v = map[key] ?? process.env[key];
   if (!v) throw new Error(`${key} environment variable is missing.`);
   return v;
 };
@@ -227,7 +232,7 @@ const wikipediaRead: AITool = {
 
 /// read_web: Readabilityエンドポイント経由でWebページを閲覧 (READABILITY_ENDPOINT が無い場合は無効)
 
-const readabilityEndpoint = process.env['READABILITY_ENDPOINT'];
+const readabilityEndpoint = get(config, 'ai.readabilityEndpoint', process.env['READABILITY_ENDPOINT']);
 
 const readWeb: AITool = {
   description: 'Readability.jsを使ってWebサイトを閲覧します。',
@@ -343,7 +348,7 @@ export const aitools: Record<string, AITool> = {
   wikipedia_search: wikipediaSearch,
   wikipedia_read: wikipediaRead,
   ...(readabilityEndpoint ? { read_web: readWeb } : {}),
-  ...(process.env['SEARCH_ENDPOINT'] ? { search_web: searchWeb } : {}),
+  ...(get(config, 'ai.searchEndpoint', process.env['SEARCH_ENDPOINT']) ? { search_web: searchWeb } : {}),
 };
 
 /** OpenAI function calling 形式のツール定義に変換する ($explain を自動追加) */

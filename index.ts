@@ -4,6 +4,7 @@
 
 import process from 'node:process';
 import { discord, fluxer } from './src/clients.ts';
+import { config, get } from './src/config.ts';
 import { setupAI } from './src/ai/mod.ts';
 import { setupAnka } from './src/anka.ts';
 import { setupCoinWatch } from './src/coinwatch.ts';
@@ -33,5 +34,5 @@ setupAllLogging();
 setupCoinWatch();
 setupAnka();
 
-discord.login(process.env['DISCORD_TOKEN']);
-fluxer.login(process.env['FLUXER_TOKEN']);
+discord.login(get(config, 'discord.token', process.env['DISCORD_TOKEN']));
+fluxer.login(get(config, 'fluxer.token', process.env['FLUXER_TOKEN']));

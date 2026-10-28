@@ -5,6 +5,7 @@
 import { WebhookClient, type Client } from 'discord.js';
 import process from 'node:process';
 import { discord, fluxer } from '../clients.ts';
+import { config, get } from '../config.ts';
 
 interface LogConfig {
   client: Client,
@@ -13,11 +14,11 @@ interface LogConfig {
   footerText: string,
 }
 
-const logwh = new WebhookClient({ url: process.env['DISCORD_LOG_WEBHOOK']! });
-const evexID = '1255359848644608035';
-const evexIDFluxer = '1493971310876907609';
+const logwh = new WebhookClient({ url: get(config, 'discord.logWebhookUrl', process.env['DISCORD_LOG_WEBHOOK'])! });
+const evexID = get(config, 'discord.guildId', '1255359848644608035');
+const evexIDFluxer = get(config, 'fluxer.guildId', '1493971310876907609');
 
-const logwhFluxer = new WebhookClient({ id: process.env['FLUXER_LOG_WEBHOOK_ID']!, token: process.env['FLUXER_LOG_WEBHOOK_TOKEN']! }, {
+const logwhFluxer = new WebhookClient({ id: get(config, 'fluxer.logWebhookId', process.env['FLUXER_LOG_WEBHOOK_ID'])!, token: get(config, 'fluxer.logWebhookToken', process.env['FLUXER_LOG_WEBHOOK_TOKEN'])! }, {
   rest: {
      api: 'https://api.fluxer.app',
      version: '1',

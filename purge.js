@@ -10,8 +10,11 @@ const client = new Client({
     ],
 });
 
-const TOKEN = process.env.DISCORD_TOKEN;
-const ALLOWED_ROLE_ID = '1255803402898898964';
+const fs = require('fs');
+let cfg = {};
+try { cfg = JSON.parse(fs.readFileSync('./data/config.json', 'utf8')); } catch {}
+const TOKEN = (cfg.discord && cfg.discord.token) || process.env.DISCORD_TOKEN;
+const ALLOWED_ROLE_ID = (cfg.purge && cfg.purge.allowedRoleId) || '1255803402898898964';
 
 client.once(Events.ClientReady, (c) => {
     console.log(`✅ Logged in as ${c.user.tag}`);

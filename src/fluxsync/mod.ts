@@ -16,6 +16,7 @@ import {
   type User as DiscordUser,
 } from 'discord.js';
 import { discord, fluxer } from '../clients.ts';
+import { config, get } from '../config.ts';
 import { saveWhMap, whMapDiscord, whMapFluxer, type WebhookLink } from './state.ts';
 
 // TODO:
@@ -98,7 +99,7 @@ const onDiscordMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<
   (await Promise.all(m.attachments.map<Promise<[string, Blob]>>(async a => [a.name, await (await fetch(a.proxyURL)).blob()])))
     .forEach((f, i) => formData.append(`files[${i}]`, f[1], f[0]));
 
-  const res = await fetch(`https://api.fluxer.app/webhooks/${targetInfo.whID}/${targetInfo.whToken}?wait=true`, {
+  const res = await fetch(`${get(config, 'fluxer.apiBase', 'https://api.fluxer.app')}/webhooks/${targetInfo.whID}/${targetInfo.whToken}?wait=true`, {
     method: "POST",
     body: formData,
   });
@@ -113,7 +114,7 @@ const onDiscordMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<
 const onFluxerMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<void> => {
   const whInfo = whMapFluxer[m.channelId];
   if (!whInfo || m.author.id === whInfo.whID) {
-    if (m.author.id === '1493964990916384451' && (m.content === '=syncsetup' || m.content.startsWith('=syncsetup '))) {
+    if (m.author.id === get(config, 'fluxsync.setupAllowedUserId', '1493964990916384451') && (m.content === '=syncsetup' || m.content.startsWith('=syncsetup '))) {
       const distCh = m.content.split(' ')[1] ?? '';
       // webhookを作る前に同期先を確かめ、失敗時に片側だけwebhookが残らないようにする
       const dist = /^\d+$/.test(distCh) ? await discord.channels.fetch(distCh).catch(() => null) : null;
@@ -126,7 +127,7 @@ const onFluxerMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<v
       whMapFluxer[m.channelId] = { whID: whSrc.id, whToken: whSrc.token, targetChannelID: distCh };
       whMapDiscord[distCh] = { whID: whDist.id, whToken: whDist.token, targetChannelID: m.channelId };
       await saveWhMap();
-      await m.reply(`link channel between https://discord.com/channels/1255359848644608035/${distCh} and https://fluxer.app/channels/1493971310876907609/${m.channelId}`);
+      await m.reply(`link channel between https://discord.com/channels/${get(config, 'discord.guildId', '1255359848644608035')}/${distCh} and https://fluxer.app/channels/${get(config, 'fluxer.guildId', '1493971310876907609')}/${m.channelId}`);
     }
     return;
   }
@@ -180,7 +181,7 @@ const onDiscordMessageUpdate = async (oldMsg: any, newMsg: any): Promise<void> =
   const targetInfo = whMapFluxer[whInfo.targetChannelID];
   if (!targetInfo) return;
   try {
-    const res = await fetch(`https://api.fluxer.app/webhooks/${targetInfo.whID}/${targetInfo.whToken}/messages/${fluxerId}`, {
+    const res = await fetch(`${get(config, 'fluxer.apiBase', 'https://api.fluxer.app')}/webhooks/${targetInfo.whID}/${targetInfo.whToken}/messages/${fluxerId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -205,7 +206,7 @@ const onDiscordMessageDelete = async (m: Message | { id: Snowflake, channelId: S
   const targetInfo = whMapFluxer[whInfo.targetChannelID];
   if (!targetInfo) return;
   try {
-    const res = await fetch(`https://api.fluxer.app/webhooks/${targetInfo.whID}/${targetInfo.whToken}/messages/${fluxerId}`, {
+    const res = await fetch(`${get(config, 'fluxer.apiBase', 'https://api.fluxer.app')}/webhooks/${targetInfo.whID}/${targetInfo.whToken}/messages/${fluxerId}`, {
       method: 'DELETE',
     });
     if (!res.ok && res.status !== 204) {
