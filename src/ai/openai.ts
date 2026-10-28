@@ -18,7 +18,7 @@ export interface OpenAICompatConfig {
 }
 
 const MAX_HISTORY = 40; // 保持するやり取りの上限 (system除く)
-const MAX_TOOL_ROUNDS = 10; // 1回の発言でツールを実行して再生成する上限
+// ツール実行の再生成上限は撤廃 (モデルが tool_calls を返し続ける限りループする)
 const MAX_TEXT_ATTACHMENT_CHARS = 20_000;
 
 const OPENCODE_SESSION_SUFFIX_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
@@ -180,7 +180,7 @@ export class OpenAICompatChat implements ChatSession {
       this.#history = trimmed.slice(trimmed.findIndex(m => m.role === 'user'));
     }
 
-    for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+    while (true) {
       let sawToolCall = false;
 
       for await (const ev of this.#complete(meta)) {
@@ -190,10 +190,6 @@ export class OpenAICompatChat implements ChatSession {
 
       // ツール呼び出しがなければ完了
       if (!sawToolCall) return;
-      if (round === MAX_TOOL_ROUNDS) {
-        yield { type: 'error', code: 'loop', message: 'ツールの実行回数上限を超えました', trace: { id: '-', url: '-' }, threadId: this.id };
-        return;
-      }
     }
   }
 

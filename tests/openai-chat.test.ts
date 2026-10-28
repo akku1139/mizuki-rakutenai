@@ -244,11 +244,3 @@ test('without tools a tool call is answered with an error result', async t => {
   assert.ok(events.some(e => e.type === 'tool-result' && (e.data.value as { error: string }).error === 'ツールが利用できません'));
 });
 
-test('a model that keeps calling tools is stopped after the round limit', async t => {
-  const tools: ToolSpec = { definitions: [{}], execute: async () => [true, {}] };
-  const requests = mockFetch(t, () => stream(delta({ tool_calls: [{ index: 0, id: 'c', function: { name: 'x', arguments: '{}' } }] }), done));
-  const chat = new OpenAICompatChat(config, tools);
-  const events = await say(chat, 'q');
-  assert.equal(requests.length, 11);
-  assert.deepEqual(events.at(-1), { type: 'error', code: 'loop', message: 'ツールの実行回数上限を超えました', trace: { id: '-', url: '-' }, threadId: chat.id });
-});
