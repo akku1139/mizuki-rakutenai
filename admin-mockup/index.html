@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>瑞稀 管理パネル (mockup)</title>
+<style>
+:root{
+  --bg:#ffffff;--fg:#1e1e2e;--panel:#f5f5f5;--border:#d0d0d0;--accent:#1e66f5;--accent-fg:#ffffff;
+  --ok:#40a02b;--warn:#df8e1d;--err:#d20f39;--muted:#6c6f85;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#1e1e2e;--fg:#cdd6f4;--panel:#181825;--border:#313244;--accent:#89b4fa;--accent-fg:#1e1e2e;
+    --ok:#a6e3a1;--warn:#f9e2af;--err:#f38ba8;--muted:#a6adc8;
+  }
+}
+body{font-family:sans-serif;margin:0;background:var(--bg);color:var(--fg)}
+header{padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
+header h1{margin:0;font-size:18px}
+nav{display:flex;gap:8px}
+nav button{background:var(--panel);color:var(--fg);border:1px solid var(--border);padding:6px 12px;border-radius:6px;cursor:pointer}
+nav button.active{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+main{padding:16px;max-width:1100px;margin:0 auto}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;font-size:13px}
+th{color:var(--accent)}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;background:var(--border)}
+.badge.ok{background:var(--ok);color:var(--bg)}
+.badge.warn{background:var(--warn);color:var(--bg)}
+.kv{display:grid;grid-template-columns:160px 1fr;gap:4px 12px;font-size:13px}
+.kv dt{color:var(--accent)}
+.logs{font-family:monospace;font-size:12px;max-height:300px;overflow:auto;background:var(--bg);padding:8px;border-radius:6px;border:1px solid var(--border)}
+.logs .error{color:var(--err)}
+.logs .warn{color:var(--warn)}
+.logs .info{color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>瑞稀 管理パネル</h1>
+  <nav>
+    <button class="active" data-tab="status">ステータス</button>
+    <button data-tab="sync">同期</button>
+    <button data-tab="ai">AI 設定</button>
+    <button data-tab="logs">ログ</button>
+  </nav>
+</header>
+<main>
+  <section id="status">
+    <div class="card">
+      <h3>ランタイム</h3>
+      <div class="kv">
+        <dt>待機ジョブ</dt><dd>2</dd>
+        <dt>処理中ジョブ</dt><dd>1</dd>
+        <dt>会話数</dt><dd>5</dd>
+        <dt>進行中の安価</dt><dd>1</dd>
+      </div>
+    </div>
+    <div class="card">
+      <h3>会話一覧</h3>
+      <table>
+        <tr><th>キー (channel:user)</th><th>プロバイダ</th><th>ラベル</th></tr>
+        <tr><td>123456:987654</td><td>rakutenai</td><td>rakutenai</td></tr>
+        <tr><td>123456:111222</td><td>openai</td><td>gpt-4o-mini</td></tr>
+      </table>
+    </div>
+  </section>
+  <section id="sync" hidden>
+    <div class="card">
+      <h3>同期ペア</h3>
+      <table>
+        <tr><th>Discord ch</th><th>Fluxer ch</th><th>操作</th></tr>
+        <tr><td>1255...035/111</td><td>1493...609/222</td><td><button>解除</button></td></tr>
+      </table>
+    </div>
+  </section>
+  <section id="ai" hidden>
+    <div class="card">
+      <h3>グローバル設定</h3>
+      <div class="kv">
+        <dt>既定プロバイダ</dt><dd><select><option>rakutenai</option><option selected>openai</option></select></dd>
+        <dt>アクティブプロファイル</dt><dd><select><option>openrouter</option><option>commandcode</option></select></dd>
+      </div>
+    </div>
+    <div class="card">
+      <h3>ユーザー別プロバイダ</h3>
+      <table>
+        <tr><th>ユーザー ID</th><th>プロバイダ</th><th>操作</th></tr>
+        <tr><td>987654</td><td>openai</td><td><button>変更</button></td></tr>
+      </table>
+    </div>
+  </section>
+  <section id="logs" hidden>
+    <div class="card">
+      <h3>ログ</h3>
+      <div class="logs">
+        <div class="info">[12:00:00] sending a message to fluxer: 156...</div>
+        <div class="error">[12:00:01] fluxer webhook edit error: 404 Unknown webhook.</div>
+        <div class="warn">[12:00:02] WebSocket Closed. Reconnecting in 5s...</div>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+const tabs=document.querySelectorAll('nav button');
+const sections=document.querySelectorAll('main section');
+tabs.forEach(b=>b.addEventListener('click',()=>{
+  tabs.forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  sections.forEach(s=>s.hidden=s.id!==b.dataset.tab);
+}));
+</script>
+</body>
+</html>

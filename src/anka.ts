@@ -8,6 +8,15 @@ import { discord } from './clients.ts';
 
 const ankas = new Map<Snowflake, { msg: Message, target: number, count: number }>();
 
+export const getAnkas = (): Array<{ target: number, count: number, channelId: string, authorId: string, url: string }> =>
+  [...ankas.values()].map(a => ({
+    target: a.target,
+    count: a.count,
+    channelId: a.msg.channelId,
+    authorId: a.msg.author.id,
+    url: a.msg.url,
+  }));
+
 export const setupAnka = (): void => {
   discord.on('messageCreate', async m => {
     if(m.author.bot) return;

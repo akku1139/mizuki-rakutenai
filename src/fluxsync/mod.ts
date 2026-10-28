@@ -257,6 +257,12 @@ const onFluxerMessageDelete = async (m: Message | { id: Snowflake, channelId: Sn
   }
 };
 
+export const getSyncPairs = (): Array<{ discordChannelId: string, fluxerChannelId: string }> =>
+  Object.keys(whMapDiscord).map(discordChannelId => ({
+    discordChannelId,
+    fluxerChannelId: whMapDiscord[discordChannelId].targetChannelID,
+  }));
+
 export const setupFluxSync = (): void => {
   discord.on('messageCreate', onDiscordMessage);
   fluxer.on('messageCreate', onFluxerMessage);

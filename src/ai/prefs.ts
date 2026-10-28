@@ -22,6 +22,7 @@ export const loadPrefs = async (): Promise<void> => {
 };
 
 export const getUserProvider = (userId: string): ProviderName | undefined => prefs.get(userId);
+export const getAllPrefs = (): Record<string, ProviderName> => Object.fromEntries(prefs);
 
 export const setUserProvider = async (userId: string, provider: ProviderName): Promise<void> => {
   prefs.set(userId, provider);

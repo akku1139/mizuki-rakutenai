@@ -415,6 +415,12 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
   }
 };
 
+export const getAIStatus = (): { waiting: number, processing: number, sessions: Array<{ key: string, provider: string, label: string }> } => ({
+  waiting: aiWaitingJobs,
+  processing: aiProcessingJobs,
+  sessions: Array.from(chatStore.entries()).map(([k, v]) => ({ key: k, provider: v.provider, label: v.t.label })),
+});
+
 export const setupAI = (): void => {
   discord.on('messageCreate', aiHandler);
   fluxer.on('messageCreate', aiHandler);

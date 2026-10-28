@@ -11,6 +11,7 @@ import { setupAnka } from './src/anka.ts';
 import { setupCoinWatch } from './src/coinwatch.ts';
 import { setupFluxSync } from './src/fluxsync/mod.ts';
 import { setupAllLogging } from './src/logging/mod.ts';
+import { setupAdmin } from './src/admin/mod.ts';
 import './src/miq.ts';
 
 process.on('unhandledRejection', (reason, promise) => {
@@ -34,6 +35,7 @@ setupFluxSync();
 setupAllLogging();
 setupCoinWatch();
 setupAnka();
+setupAdmin();
 
 discord.login(get(config, 'discord.token', process.env['DISCORD_TOKEN']));
 fluxer.login(get(config, 'fluxer.token', process.env['FLUXER_TOKEN']));

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>瑞稀 管理パネル</title>
+<style>
+:root{--bg:#ffffff;--fg:#1e1e2e;--panel:#f5f5f5;--border:#d0d0d0;--accent:#1e66f5;--accent-fg:#ffffff;--ok:#40a02b;--warn:#df8e1d;--err:#d20f39;--muted:#6c6f85}
+@media (prefers-color-scheme: dark){:root{--bg:#1e1e2e;--fg:#cdd6f4;--panel:#181825;--border:#313244;--accent:#89b4fa;--accent-fg:#1e1e2e;--ok:#a6e3a1;--warn:#f9e2af;--err:#f38ba8;--muted:#a6adc8}}
+body{font-family:sans-serif;margin:0;background:var(--bg);color:var(--fg)}
+header{padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
+header h1{margin:0;font-size:18px}
+nav{display:flex;gap:8px}
+nav button{background:var(--panel);color:var(--fg);border:1px solid var(--border);padding:6px 12px;border-radius:6px;cursor:pointer}
+nav button.active{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+main{padding:16px;max-width:1100px;margin:0 auto}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;font-size:13px}
+th{color:var(--accent)}
+.kv{display:grid;grid-template-columns:160px 1fr;gap:4px 12px;font-size:13px}
+.kv dt{color:var(--accent)}
+.logs{font-family:monospace;font-size:12px;max-height:300px;overflow:auto;background:var(--bg);padding:8px;border-radius:6px;border:1px solid var(--border)}
+.logs .error{color:var(--err)}.logs .warn{color:var(--warn)}.logs .info{color:var(--muted)}
+</style>
+</head>
+<body>
+<header><h1>瑞稀 管理パネル</h1><nav>
+<button class="active" data-tab="status">ステータス</button>
+<button data-tab="sync">同期</button>
+<button data-tab="ai">AI 設定</button>
+<button data-tab="logs">ログ</button>
+</nav></header>
+<main>
+<section id="status"><div class="card"><h3>ランタイム</h3><div class="kv" id="runtime"></div></div><div class="card"><h3>会話一覧</h3><table id="sessions"><tr><th>キー</th><th>プロバイダ</th><th>ラベル</th></tr></table></div><div class="card"><h3>安価</h3><table id="ankas"><tr><th>target</th><th>count</th><th>channel</th><th>url</th></tr></table></div></section>
+<section id="sync" hidden><div class="card"><h3>同期ペア</h3><table id="syncs"><tr><th>Discord ch</th><th>Fluxer ch</th></tr></table></div></section>
+<section id="ai" hidden><div class="card"><h3>ユーザー別プロバイダ</h3><table id="prefs"><tr><th>ユーザー ID</th><th>プロバイダ</th></tr></table></div></section>
+<section id="logs" hidden><div class="card"><h3>ログ</h3><div class="logs" id="logbox"></div></div></section>
+</main>
+<script>
+const tabs=document.querySelectorAll('nav button');
+const sections=document.querySelectorAll('main section');
+tabs.forEach(b=>b.addEventListener('click',()=>{tabs.forEach(x=>x.classList.remove('active'));b.classList.add('active');sections.forEach(s=>s.hidden=s.id!==b.dataset.tab);}));
+async function api(p){const r=await fetch(p,{headers:{'Authorization':'Bearer '+ (localStorage.token||'')}});return r.json();}
+function row(t,cells){const tr=document.createElement('tr');cells.forEach(c=>{const td=document.createElement('td');td.textContent=c;tr.appendChild(td);});t.appendChild(tr);}
+async function refresh(){
+  const s=await api('/api/status');
+  const rt=document.getElementById('runtime');rt.innerHTML='';
+  [['待機ジョブ',s.waiting],['処理中ジョブ',s.processing],['会話数',s.sessions.length],['安価',s.ankas.length]].forEach(([k,v])=>{const dt=document.createElement('dt');dt.textContent=k;const dd=document.createElement('dd');dd.textContent=v;rt.append(dt,dd);});
+  const st=document.getElementById('sessions');st.innerHTML='<tr><th>キー</th><th>プロバイダ</th><th>ラベル</th></tr>';
+  s.sessions.forEach(x=>row(st,[x.key,x.provider,x.label]));
+  const ak=document.getElementById('ankas');ak.innerHTML='<tr><th>target</th><th>count</th><th>channel</th><th>url</th></tr>';
+  s.ankas.forEach(x=>row(ak,[x.target,x.count,x.channelId,x.url]));
+  const sy=await api('/api/sync');const syt=document.getElementById('syncs');syt.innerHTML='<tr><th>Discord ch</th><th>Fluxer ch</th></tr>';sy.forEach(x=>row(syt,[x.discordChannelId,x.fluxerChannelId]));
+  const pr=await api('/api/ai-prefs');const prt=document.getElementById('prefs');prt.innerHTML='<tr><th>ユーザー ID</th><th>プロバイダ</th></tr>';Object.entries(pr).forEach(([k,v])=>row(prt,[k,v]));
+  const lg=await api('/api/logs');const lb=document.getElementById('logbox');lb.innerHTML='';lg.forEach(e=>{const d=document.createElement('div');d.className=e.level;d.textContent=`[${new Date(e.ts).toLocaleTimeString()}] ${e.message}`;lb.appendChild(d);});
+}
+refresh();setInterval(refresh,5000);
+</script>
+</body>
+</html>
