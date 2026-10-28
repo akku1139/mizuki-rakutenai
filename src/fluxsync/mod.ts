@@ -192,6 +192,10 @@ const onDiscordMessageUpdate = async (oldMsg: any, newMsg: any): Promise<void> =
       }),
     });
     if (!res.ok) {
+      if (res.status === 404) {
+        dToF.delete(m.id);
+        fToD.delete(fluxerId);
+      }
       error('fluxer webhook edit error:', res.status, await res.text());
     }
   } catch (e) {
@@ -235,7 +239,11 @@ const onFluxerMessageUpdate = async (oldMsg: any, newMsg: any): Promise<void> =>
       embeds: m.embeds,
       allowedMentions: { parse: [] },
     });
-  } catch (e) {
+  } catch (e: any) {
+    if (e?.code === 10008 || e?.status === 404) {
+      fToD.delete(m.id);
+      dToF.delete(discordId);
+    }
     error('failed to edit discord webhook message:', e);
   }
 };
