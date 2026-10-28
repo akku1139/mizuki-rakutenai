@@ -355,19 +355,74 @@ export let aitools: Record<string, AITool> = {
 };
 
 /** OpenAI function calling 形式のツール定義に変換する ($explain を自動追加) */
+const searchMcpTools: AITool = {
+  description: 'MCP ツールをキーワードで検索します。query が空なら一覧を返します。',
+  parametersJsonSchema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: '検索キーワード' },
+      offset: { type: 'number', description: 'オフセット (既定 0)' },
+    },
+  },
+  async execute({ query, offset }) {
+    const q = typeof query === 'string' ? query.toLowerCase() : '';
+    const off = typeof offset === 'number' ? Math.max(0, offset) : 0;
+    const all = getMcpTools();
+    const filtered = q ? all.filter(t => (t.name + ' ' + t.description + ' ' + t.server).toLowerCase().includes(q)) : all;
+    const page = filtered.slice(off, off + 20);
+    return [true, {
+      tools: page.map(t => ({
+        tool_id: flattenToolName(t.server, t.name),
+        server: t.server,
+        name: t.name,
+        description: t.description.slice(0, 1000),
+        inputSchema: t.inputSchema,
+      })),
+      totalMatches: filtered.length,
+      nextOffset: off + page.length < filtered.length ? off + page.length : null,
+    }];
+  },
+};
+
+const runMcpTool: AITool = {
+  description: 'search_tools で見つけた tool_id を指定して MCP ツールを実行します。',
+  parametersJsonSchema: {
+    type: 'object',
+    properties: {
+      tool_id: { type: 'string', description: 'search_tools が返した tool_id' },
+      arguments: { type: 'object', description: 'ツールに渡す引数' },
+    },
+    required: ['tool_id'],
+  },
+  async execute({ tool_id, arguments: args }) {
+    if (typeof tool_id !== 'string') return [false, { error: 'tool_id は文字列で指定してください' }];
+    const a = args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : {};
+    const r = await callMcpTool(tool_id, a);
+    if (r === null) return [false, { error: 'unknown tool_id' }];
+    return [r.ok, r.text] as AIToolResult;
+  },
+};
+
 export const getAllAitools = (): Record<string, AITool> => {
   const out: Record<string, AITool> = { ...aitools };
-  for (const t of getMcpTools()) {
-    const flat = flattenToolName(t.server, t.name);
-    out[flat] = {
-      description: t.description,
-      parametersJsonSchema: t.inputSchema,
-      async execute(args) {
-        const r = await callMcpTool(flat, args);
-        if (r === null) return [false, { error: 'mcp tool not found' }];
-        return [r.ok, r.text] as AIToolResult;
-      },
-    };
+  const mcpTools = getMcpTools();
+  if (mcpTools.length === 0) return out;
+  if (mcpTools.length <= 20) {
+    for (const t of mcpTools) {
+      const flat = flattenToolName(t.server, t.name);
+      out[flat] = {
+        description: t.description,
+        parametersJsonSchema: t.inputSchema,
+        async execute(args) {
+          const r = await callMcpTool(flat, args);
+          if (r === null) return [false, { error: 'mcp tool not found' }];
+          return [r.ok, r.text] as AIToolResult;
+        },
+      };
+    }
+  } else {
+    out['search_tools'] = searchMcpTools;
+    out['run_tool'] = runMcpTool;
   }
   return out;
 };
