@@ -493,10 +493,23 @@ const searchMcpTools: AITool = {
     },
   },
   async execute({ query, offset }) {
-    const q = typeof query === 'string' ? query.toLowerCase() : '';
-    const off = typeof offset === 'number' ? Math.max(0, offset) : 0;
+    const q = typeof query === 'string' ? query.toLowerCase().trim() : '';
+    const off = typeof offset === 'number' ? Math.max(0, Math.trunc(offset)) : 0;
     const all = getMcpTools();
-    const filtered = q ? all.filter(t => (t.name + ' ' + t.description + ' ' + t.server).toLowerCase().includes(q)) : all;
+    const terms = q.split(/\\s+/).filter(Boolean);
+    const scored = all.map(t => {
+      const hay = (t.name + ' ' + t.description + ' ' + t.server).toLowerCase();
+      let score = 0;
+      if (q && hay.includes(q)) score += 5;
+      for (const term of terms) {
+        if (hay.includes(term)) score += 2;
+        if (t.name.toLowerCase().startsWith(term)) score += 3;
+        if (t.name.toLowerCase() === term) score += 5;
+      }
+      return { t, score };
+    }).filter(x => q === '' || x.score > 0)
+      .sort((a, b) => b.score - a.score || a.t.name.localeCompare(b.t.name));
+    const filtered = scored.map(x => x.t);
     const page = filtered.slice(off, off + 20);
     return [true, {
       tools: page.map(t => ({
@@ -526,7 +539,13 @@ const runMcpTool: AITool = {
     if (typeof tool_id !== 'string') return [false, { error: 'tool_id は文字列で指定してください' }];
     const a = args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : {};
     const r = await callMcpTool(tool_id, a);
-    if (r === null) return [false, { error: 'unknown tool_id' }];
+    if (r === null) {
+      const near = getMcpTools()
+        .map(t => flattenToolName(t.server, t.name))
+        .filter(n => n.toLowerCase().includes(String(tool_id).toLowerCase().slice(0, 20)))
+        .slice(0, 5);
+      return [false, { error: `unknown tool_id. Closest: ${near.join(', ') || 'none'}` }];
+    }
     return [r.ok, r.text] as AIToolResult;
   },
 };
