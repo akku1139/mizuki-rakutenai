@@ -361,7 +361,11 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
                 log('fc:', gen);
                 const toolText = `-# ${gen.data.description !== '' ? `${gen.data.description} ` : ''}(\`${gen.data.name}\`)...`
                 if (!toolLogMsg)
-                  toolLogMsg = await m.channel.send(toolText);
+                  try {
+                    toolLogMsg = await m.channel.send(toolText);
+                  } catch (e) {
+                    error('error:', e);
+                  }
                 else
                   toolLogMsg.edit(toolText);
                 break;
