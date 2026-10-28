@@ -142,6 +142,7 @@ export const startMcpOAuth = async (name: string): Promise<{ url: string }> => {
   const existing = flows.get(name);
   if (existing) await existing.close().catch(() => {});
 
+  if (!store) store = new McpAuthStore('./data');
   const loop = await listenForCallback();
   const auth = new ServerAuth(name, loop.redirectUrl, (server, data) => store!.set(server, data));
   if (store) await auth.hydrate(await store.get(name));
