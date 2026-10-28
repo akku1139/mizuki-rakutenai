@@ -140,7 +140,9 @@ export const setupAdmin = (): void => {
           threads = [...((g as any).threads?.cache?.values?.() ?? [])];
         }
         for (const t of threads) {
-          out.push({ id: t.id, name: `${g.name} / #${t.parent?.name ?? '?'} / ${t.name}`, platform, position: (t as any).rawPosition ?? 0, blacklisted: (config.blacklistedChannels ?? []).includes(t.id) || (!!t.parentId && (config.blacklistedChannels ?? []).includes(t.parentId)) });
+          const parent = t.parent;
+          const cat = parent?.parentId ? cats.get(parent.parentId) : undefined;
+          out.push({ id: t.id, name: `${g.name} / ${cat ? cat + ' / ' : ''}#${parent?.name ?? '?'} / ${t.name}`, platform, position: (t as any).rawPosition ?? 0, blacklisted: (config.blacklistedChannels ?? []).includes(t.id) || (!!t.parentId && (config.blacklistedChannels ?? []).includes(t.parentId)) });
         }
       }
     }
