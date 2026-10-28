@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { log, info, warn, error } from '../log.ts';
 
 const MAX_RETRIES = 3;
 const MAX_WAIT_MS = 60_000;

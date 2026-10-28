@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { log, info, warn, error } from '../log.ts';
 
 /// ユーザーごとのAIプロバイダ設定の永続化 (data/ai_prefs.json)。
 

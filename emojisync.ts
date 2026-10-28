@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { log, info, warn, error } from './src/log.ts';
 
 // EvexのDiscordサーバーのアニメーション絵文字とスタンプ(スティッカー)をFluxerサーバーへコピーする。
 // 静止画の絵文字は移行済みなので対象にしない。
@@ -44,7 +45,7 @@ const fluxer = new Client({
 
 // Fluxerは厳密にはAPI互換ではないので、拾いきれないrejectionでスクリプトごと落ちないようにする
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('unhandledRejection', reason, promise);
+  error('unhandledRejection', reason, promise);
 });
 
 const download = async (url: string): Promise<Buffer> =>
@@ -101,21 +102,21 @@ const syncEmojis = async (from: Guild, to: Guild, label: string): Promise<void> 
 
       if (buf.length > MAX_BYTES) {
         // 縮小には外部ツールが要るので、ここでは対象を挙げるだけにする
-        console.error(`  - emoji ${e.name}: ${buf.length} bytes (over ${MAX_BYTES}), needs shrinking by hand`);
+        error(`  - emoji ${e.name}: ${buf.length} bytes (over ${MAX_BYTES}), needs shrinking by hand`);
         ++tooBig;
         continue;
       }
 
       await to.emojis.create({ attachment: dataUri(buf, 'image/gif'), name: e.name });
-      console.log(`  + emoji ${e.name} (${buf.length} bytes)`);
+      log(`  + emoji ${e.name} (${buf.length} bytes)`);
       ++created;
     } catch (err) {
-      console.error(`  ! emoji ${e.name}:`, describeError(err));
+      error(`  ! emoji ${e.name}:`, describeError(err));
       ++failed;
     }
   }
 
-  console.log(`${label} animated emojis: ${created} created${tooBig > 0 ? `, ${tooBig} too big` : ''}${failed > 0 ? `, ${failed} failed` : ''}`);
+  log(`${label} animated emojis: ${created} created${tooBig > 0 ? `, ${tooBig} too big` : ''}${failed > 0 ? `, ${failed} failed` : ''}`);
 };
 
 /**
@@ -138,7 +139,7 @@ const syncStickers = async (from: Guild, to: Guild, label: string): Promise<void
       const buf = await download(s.url);
 
       if (buf.length > MAX_BYTES) {
-        console.error(`  - sticker ${s.name}: ${buf.length} bytes (over ${MAX_BYTES}), needs shrinking by hand`);
+        error(`  - sticker ${s.name}: ${buf.length} bytes (over ${MAX_BYTES}), needs shrinking by hand`);
         ++tooBig;
         continue;
       }
@@ -151,19 +152,19 @@ const syncStickers = async (from: Guild, to: Guild, label: string): Promise<void
           image: dataUri(buf, stickerMime[s.format] ?? 'image/png'),
         },
       });
-      console.log(`  + sticker ${s.name} (${buf.length} bytes)`);
+      log(`  + sticker ${s.name} (${buf.length} bytes)`);
       ++created;
     } catch (err) {
-      console.error(`  ! sticker ${s.name}:`, describeError(err));
+      error(`  ! sticker ${s.name}:`, describeError(err));
       ++failed;
     }
   }
 
-  console.log(`${label} stickers: ${created} created${tooBig > 0 ? `, ${tooBig} too big` : ''}${failed > 0 ? `, ${failed} failed` : ''}`);
+  log(`${label} stickers: ${created} created${tooBig > 0 ? `, ${tooBig} too big` : ''}${failed > 0 ? `, ${failed} failed` : ''}`);
 };
 
 if (!process.env['DISCORD_TOKEN'] || !process.env['FLUXER_TOKEN']) {
-  console.error('DISCORD_TOKEN and FLUXER_TOKEN environment variables are required.');
+  error('DISCORD_TOKEN and FLUXER_TOKEN environment variables are required.');
   process.exit(1);
 }
 

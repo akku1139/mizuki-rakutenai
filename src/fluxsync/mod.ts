@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { log, info, warn, error } from '../log.ts';
 
 /// Bridges channels between Discord and Fluxer via webhooks.
 
@@ -64,7 +65,7 @@ const stickerLinks = (stickers: Message['stickers']): string =>
 const onDiscordMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<void> => {
   const whInfo = whMapDiscord[m.channelId];
   if (!whInfo || m.author.id === whInfo.whID) return;
-  console.log('sending a message to fluxer:', m.id);
+  log('sending a message to fluxer:', m.id);
   const targetInfo = whMapFluxer[whInfo.targetChannelID];
   const repliedId = dToF.get(m.reference?.messageId ?? '');
 
@@ -105,7 +106,7 @@ const onDiscordMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<
   });
   if (!res.ok) {
     // Error bodies are not always JSON, e.g. a proxy 502.
-    console.error('fluxer webhook error:', res.status, await res.text());
+    error('fluxer webhook error:', res.status, await res.text());
     return;
   }
   linkMessages(m.id, (await res.json() as { id: Snowflake }).id);
@@ -131,7 +132,7 @@ const onFluxerMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<v
     }
     return;
   }
-  console.log('sending a message to discord:', m.id);
+  log('sending a message to discord:', m.id);
   const targetInfo = whMapDiscord[whInfo.targetChannelID];
   const targetGuild = guildOfChannel(discord, whInfo.targetChannelID);
   const repliedId = fToD.get(m.reference?.messageId ?? '');
@@ -191,10 +192,10 @@ const onDiscordMessageUpdate = async (oldMsg: any, newMsg: any): Promise<void> =
       }),
     });
     if (!res.ok) {
-      console.error('fluxer webhook edit error:', res.status, await res.text());
+      error('fluxer webhook edit error:', res.status, await res.text());
     }
   } catch (e) {
-    console.error('failed to edit fluxer webhook message:', e);
+    error('failed to edit fluxer webhook message:', e);
   }
 };
 
@@ -210,10 +211,10 @@ const onDiscordMessageDelete = async (m: Message | { id: Snowflake, channelId: S
       method: 'DELETE',
     });
     if (!res.ok && res.status !== 204) {
-      console.error('fluxer webhook delete error:', res.status, await res.text());
+      error('fluxer webhook delete error:', res.status, await res.text());
     }
   } catch (e) {
-    console.error('failed to delete fluxer webhook message:', e);
+    error('failed to delete fluxer webhook message:', e);
   } finally {
     dToF.delete(m.id);
     fToD.delete(fluxerId);
@@ -235,7 +236,7 @@ const onFluxerMessageUpdate = async (oldMsg: any, newMsg: any): Promise<void> =>
       allowedMentions: { parse: [] },
     });
   } catch (e) {
-    console.error('failed to edit discord webhook message:', e);
+    error('failed to edit discord webhook message:', e);
   }
 };
 
@@ -249,7 +250,7 @@ const onFluxerMessageDelete = async (m: Message | { id: Snowflake, channelId: Sn
   try {
     await getDiscordWH(targetInfo).deleteMessage(discordId);
   } catch (e) {
-    console.error('failed to delete discord webhook message:', e);
+    error('failed to delete discord webhook message:', e);
   } finally {
     fToD.delete(m.id);
     dToF.delete(discordId);

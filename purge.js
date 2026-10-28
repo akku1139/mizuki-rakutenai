@@ -1,3 +1,4 @@
+const { log, info, warn, error } = require('./src/log.js');
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { Client, GatewayIntentBits, Events } from 'discord.js';
@@ -17,7 +18,7 @@ const TOKEN = (cfg.discord && cfg.discord.token) || process.env.DISCORD_TOKEN;
 const ALLOWED_ROLE_ID = (cfg.purge && cfg.purge.allowedRoleId) || '1255803402898898964';
 
 client.once(Events.ClientReady, (c) => {
-    console.log(`✅ Logged in as ${c.user.tag}`);
+    log(`✅ Logged in as ${c.user.tag}`);
 });
 
 /**
@@ -36,7 +37,7 @@ async function purgeMessages(channel, startMessageId) {
     let totalDeleted = 0;
     let continueLoop = true;
 
-    console.log(`--- 削除開始 (起点ID: ${lastId || '最新'}) ---`);
+    log(`--- 削除開始 (起点ID: ${lastId || '最新'}) ---`);
 
     try {
         while (continueLoop) {
@@ -45,7 +46,7 @@ async function purgeMessages(channel, startMessageId) {
 
             const fetched = await channel.messages.fetch(options);
             if (fetched.size === 0) {
-                console.log('取得できるメッセージがなくなりました。');
+                log('取得できるメッセージがなくなりました。');
                 break;
             }
 
@@ -58,7 +59,7 @@ async function purgeMessages(channel, startMessageId) {
             if (targets.size > 0) {
                 const deleted = await channel.bulkDelete(targets, true);
                 totalDeleted += deleted.size;
-                console.log(`${deleted.size} 件削除（累計: ${totalDeleted}）`);
+                log(`${deleted.size} 件削除（累計: ${totalDeleted}）`);
             }
 
             // 終了判定のロジック:
@@ -68,7 +69,7 @@ async function purgeMessages(channel, startMessageId) {
             const hasReachedOldLimit = fetched.some(msg => msg.createdTimestamp <= bulkDeleteLimit);
 
             if (hasReachedLimit || hasReachedOldLimit) {
-                console.log('境界線（3時間前または14日前）に到達しました。');
+                log('境界線（3時間前または14日前）に到達しました。');
                 continueLoop = false;
             }
 
@@ -82,10 +83,10 @@ async function purgeMessages(channel, startMessageId) {
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        console.log(`--- 完了: 合計 ${totalDeleted} 件を削除しました ---`);
+        log(`--- 完了: 合計 ${totalDeleted} 件を削除しました ---`);
 
     } catch (error) {
-        console.error('削除中にエラーが発生しました:', error);
+        error('削除中にエラーが発生しました:', error);
     }
 }
 
@@ -109,7 +110,7 @@ client.on(Events.MessageCreate, async (message) => {
 });
 
 if (!TOKEN) {
-    console.error('DISCORD_TOKEN environment variable is missing.');
+    error('DISCORD_TOKEN environment variable is missing.');
     process.exit(1);
 }
 

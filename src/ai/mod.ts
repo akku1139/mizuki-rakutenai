@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { log, info, warn, error } from '../log.ts';
 
 /// Mention-triggered AI assistant (RakutenAI / OpenAI互換API).
 
@@ -72,7 +73,7 @@ const fetchRepliedMessages = async (m: OmitPartialGroupDMChannel<Message<boolean
       .filter(msg => msg.author.id === ref.author.id && msg.id !== m.id)
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
   } catch (e) {
-    console.error('failed to fetch the replied message:', e);
+    error('failed to fetch the replied message:', e);
     return [];
   }
 };
@@ -233,7 +234,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
     const { t: chat } = entry;
 
     const previousTask = entry.q;
-    let resolveNext: () => void = () => console.error(m.id, 'Execute off-queue');
+    let resolveNext: () => void = () => error(m.id, 'Execute off-queue');
     entry.q = new Promise((resolve) => {
       resolveNext = resolve;
     });
@@ -243,7 +244,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       await previousTask;
       --aiWaitingJobs;
       ++aiProcessingJobs;
-      console.info(m.id, ': start');
+      info(m.id, ': start');
 
       m.channel.sendTyping();
 
@@ -265,7 +266,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       const contextBlock = buildContextBlock(m, sorted, entry.lastIds, rep.length, replied);
 
       const attachmentFiles = await Promise.all(withSnapshots(m).flatMap(s => [...s.attachments.values()]).map(async f => {
-        console.log('file:', f.url, f.name);
+        log('file:', f.url, f.name);
         const file = await createFileFromUrl(f.proxyURL, f.name);
         return chat.uploadFile({ file, isImage: file.type.startsWith('image/') })
       }));
@@ -279,13 +280,13 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       ];
       const extraFiles = await Promise.all(extraSources.map(async ({ url, name, imageOnly }) => {
         try {
-          console.log('file:', url, name);
+          log('file:', url, name);
           const file = await createFileFromUrl(url, name);
           const isImage = file.type.startsWith('image/');
           if (imageOnly && !isImage) return undefined;
           return await chat.uploadFile({ file, isImage });
         } catch (e) {
-          console.error('failed to load a file:', url, e);
+          error('failed to load a file:', url, e);
           return undefined;
         }
       }));
@@ -293,7 +294,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       const input = rep + contextBlock;
 
-      console.log(m.id, `[${chat.label}]`, input);
+      log(m.id, `[${chat.label}]`, input);
 
       const res = chat.sendMessage({
         mode: "USER_INPUT",
@@ -319,21 +320,21 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
           m.channel.sendTyping();
         switch (gen.type) {
           case 'reasoning-start':
-            console.log('start reasoning...');
+            log('start reasoning...');
             break;
 
           case 'reasoning-delta':
-            console.log('reasoning:', gen.text);
+            log('reasoning:', gen.text);
             break;
 
           case 'text-delta':
-            console.log('gen:', gen.text);
+            log('gen:', gen.text);
             text += gen.text;
             break;
 
           case 'image-thumbnail':
           case 'image':
-            console.log('image:', gen.url);
+            log('image:', gen.url);
             m.channel.sendTyping();
 
             if (!isEffectivelyEmpty(text)) {
@@ -360,12 +361,12 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
             break;
 
           case 'tool-call':
-            console.log('function call:');
+            log('function call:');
             m.channel.sendTyping();
             break;
 
           case 'tool-call-detail':
-            console.log('fc:', gen);
+            log('fc:', gen);
             toolCount.set(gen.data.name, (toolCount.get(gen.data.name) ?? 0) + 1);
             const toolText = `-# ${gen.data.description !== '' ? `${gen.data.description} ` : ''}(${gen.data.name})...`
             if (!toolLogMsg)
@@ -375,7 +376,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
             break;
 
           case 'tool-result':
-            console.log('tool result:', gen.data);
+            log('tool result:', gen.data);
             m.channel.sendTyping();
             break;
 
@@ -385,12 +386,12 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
             break;
 
           case 'usage':
-            console.log('usage:', gen.usage);
+            log('usage:', gen.usage);
             usage = gen.usage;
             break;
 
           default:
-            console.log(m.id, 'gen :', gen);
+            log(m.id, 'gen :', gen);
             break;
         }
       }
@@ -405,7 +406,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       entry.lastIds = sentMessageIds;
 
     } catch (e) {
-      console.error(m.id, ': An error occurred during processing\n', e);
+      error(m.id, ': An error occurred during processing\n', e);
       await m.reply(`ERROR:\n\`\`\`\n${e}\n\`\`\``);
     } finally {
       --aiProcessingJobs;

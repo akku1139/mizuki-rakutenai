@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { log, info, warn, error } from '../log.ts';
 
 /// Posts message/member events to log webhooks (Discord and Fluxer).
 

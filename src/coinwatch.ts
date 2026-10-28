@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { log, info, warn, error } from './log.ts';
 
 /// Watches the MEXC deals stream of 114514USDT and posts periodic reports.
 
@@ -22,7 +23,7 @@ discord.on('clientReady', async (c) => {
 });
 
 const mexc = new MexcWebsocketClient((event) => {
-  // console.log(event);
+  // log(event);
   if (event.type === 'MARKET_DATA') {
     const wrapper = event.data;
     const publicDeals = wrapper.publicAggreDeals;
@@ -62,7 +63,7 @@ setInterval(async () => {
     description: message,
     timestamp: new Date().toISOString(),
   }] });
-  // console.log(message);
+  // log(message);
 
   // 送信後にバッファをリセット
   hasNewData = false;

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { log, info, warn, error } from './log.ts';
 
 import { fluxer } from './clients.ts';
 import { config, get } from './config.ts';
@@ -18,7 +19,7 @@ fluxer.on('messageCreate', async m => {
     const response = await miq.toURL();
     await m.reply(response);
   } catch (e) {
-    console.error(m.id, ': miq failed\n', e);
+    error(m.id, ': miq failed\n', e);
     await m.reply(`ERROR:\n\`\`\`\n${e}\n\`\`\``).catch(() => {});
   }
 });

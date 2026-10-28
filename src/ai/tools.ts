@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { log, info, warn, error } from '../log.ts';
 
 /// OpenAI互換API向けのAIツール群。
 /// akku1139/evex-quotes の src/aitools を移植し、OpenAIのfunction calling形式で使えるようにしたもの。
@@ -391,7 +392,7 @@ export const executeAITool = async (
 ): Promise<AIToolResult> => {
   const tool = aitools[name];
   if (!tool) return [false, { error: `function: ${name} は存在しません` }];
-  console.log('tool call:', name, ':', args);
+  log('tool call:', name, ':', args);
   return tool.execute(args, meta);
 };
 

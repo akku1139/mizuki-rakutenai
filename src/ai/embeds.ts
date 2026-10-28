@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { log, info, warn, error } from '../log.ts';
 
 /// Turns what a message carries outside its content (embeds, attachments, forwarded messages)
 /// into text and image URLs the model can use.

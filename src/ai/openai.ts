@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { log, info, warn, error } from '../log.ts';
 
 /// OpenAI互換 (/v1/chat/completions) API を ChatSession インターフェースに適合させるアダプタ。
 /// ツール (function calling) 対応。モデルがツール呼び出しを返した場合は実行して

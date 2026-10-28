@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { log, info, warn, error } from './log.ts';
 
 /// Small platform-independent helpers.
 
@@ -58,8 +59,8 @@ export const getFileName = (urlString: string): string => {
 
     // コロン（:）以降が含まれる場合は、それより前を抽出
     return lastSegment.split(':')[0];
-  } catch (error) {
-    console.error("Invalid URL", error);
+  } catch (e) {
+    error("Invalid URL", e);
     return '';
   }
 };

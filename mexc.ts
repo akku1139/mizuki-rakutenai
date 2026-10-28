@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { log, info, warn, error } from './src/log.ts';
 
 import { PushDataV3ApiWrapper } from './mexc-proto/PushDataV3ApiWrapper.ts';
 
@@ -19,14 +20,14 @@ export class MexcWebsocketClient {
   }
 
   connect(): void {
-    console.log('Connecting to MEXC WebSocket...');
+    log('Connecting to MEXC WebSocket...');
     this.#ws = new WebSocket(this.#baseUrl);
 
     // Protobufを扱うために binaryType を設定
     this.#ws.binaryType = 'arraybuffer';
 
     this.#ws.onopen = () => {
-      console.log('✅ WebSocket Connected');
+      log('✅ WebSocket Connected');
       this.#startHeartbeat();
       this.#resubscribe();
     };
@@ -36,13 +37,13 @@ export class MexcWebsocketClient {
     };
 
     this.#ws.onclose = () => {
-      console.warn('⚠️ WebSocket Closed. Reconnecting in 5s...');
+      warn('⚠️ WebSocket Closed. Reconnecting in 5s...');
       this.#stopHeartbeat();
       this.#reconnect();
     };
 
     this.#ws.onerror = (err) => {
-      console.error('❌ WebSocket Error:', err);
+      error('❌ WebSocket Error:', err);
     };
   }
 
@@ -76,7 +77,7 @@ export class MexcWebsocketClient {
         // メインループをブロックしないよう非同期で通知
         queueMicrotask(() => this.#onMessage({ type: 'CONTROL', data: json }));
       } catch (e) {
-        console.error('JSON Parse Error', e);
+        error('JSON Parse Error', e);
       }
       return;
     }
@@ -91,7 +92,7 @@ export class MexcWebsocketClient {
         // これにより、Discord送信処理が重くてもWSの受信（TCPバッファ）を止めない
         queueMicrotask(() => this.#onMessage({ type: 'MARKET_DATA', data: decoded }));
       } catch (e) {
-        console.error('Protobuf Deserialization Error', e);
+        error('Protobuf Deserialization Error', e);
       }
     }
   }
