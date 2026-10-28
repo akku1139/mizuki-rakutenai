@@ -24,7 +24,7 @@ th{color:var(--accent)}
 </style>
 </head>
 <body>
-<header><h1>瑞稀 管理パネル</h1><nav>
+<header><h1>瑞稀 管理パネル</h1><input id="token" placeholder="Bearer token" style="margin-left:auto" onchange="localStorage.token=this.value"><nav>
 <button class="active" data-tab="status">ステータス</button>
 <button data-tab="sync">同期</button>
 <button data-tab="ai">AI 設定</button>
@@ -32,6 +32,7 @@ th{color:var(--accent)}
 <button data-tab="mcp">MCP</button>
 <button data-tab="channels">チャンネル</button>
 </nav></header>
+<div id="statusbar" style="padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--border);font-size:12px;color:var(--muted)"></div>
 <main>
 <section id="status"><div class="card"><h3>ランタイム</h3><div class="kv" id="runtime"></div></div><div class="card"><h3>会話一覧</h3><table id="sessions"><tr><th>キー</th><th>プロバイダ</th><th>ラベル</th></tr></table></div><div class="card"><h3>安価</h3><table id="ankas"><tr><th>target</th><th>count</th><th>channel</th><th>url</th></tr></table></div></section>
 <section id="sync" hidden><div class="card"><h3>同期ペア</h3><table id="syncs"><tr><th>Discord ch</th><th>Fluxer ch</th></tr></table></div></section>
@@ -53,9 +54,12 @@ function showTab(name){if(!name)name='status';tabs.forEach(x=>x.classList.toggle
 tabs.forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.tab)));
 window.addEventListener('hashchange',()=>showTab((location.hash||'').replace('#','')));
 showTab((location.hash||'').replace('#',''));
-async function api(p){const r=await fetch(p,{headers:{'Authorization':'Bearer '+ (localStorage.token||'')}});return r.json();}
+const tokenInput=document.getElementById('token');tokenInput.value=localStorage.token||'';tokenInput.onchange=()=>localStorage.token=tokenInput.value;
+async function api(p){const r=await fetch(p,{headers:{'Authorization':'Bearer '+(localStorage.token||'')}});if(!r.ok)throw new Error(r.status+' '+r.statusText);return r.json();}
 function row(t,cells){const tr=document.createElement('tr');cells.forEach(c=>{const td=document.createElement('td');td.textContent=c;tr.appendChild(td);});t.appendChild(tr);}
 async function refresh(){
+  const bar=document.getElementById('statusbar');
+  try {
   const s=await api('/api/status');
   const rt=document.getElementById('runtime');rt.innerHTML='';
   [['待機ジョブ',s.waiting],['処理中ジョブ',s.processing],['会話数',s.sessions.length],['安価',s.ankas.length]].forEach(([k,v])=>{const dt=document.createElement('dt');dt.textContent=k;const dd=document.createElement('dd');dd.textContent=v;rt.append(dt,dd);});
@@ -73,6 +77,7 @@ if(x.oauthRequired){const ob=document.createElement('button');ob.textContent='�
 const eb=document.createElement('button');eb.textContent='編集';eb.onclick=()=>{document.getElementById('m_name').value=x.name;document.getElementById('m_url').value=x.url||'';document.getElementById('m_cmd').value=x.command||'';document.getElementById('m_tr').value=x.transport||'http';document.getElementById('m_headers').value=x.headers?JSON.stringify(x.headers):'';document.getElementById('m_submit').textContent='更新';document.getElementById('m_name').readOnly=true;};td.appendChild(eb);
 const db=document.createElement('button');db.textContent='削除';db.onclick=async()=>{await fetch('/api/mcp?name='+encodeURIComponent(x.name),{method:'DELETE',headers:{'Authorization':'Bearer '+(localStorage.token||'')}});refresh();};td.appendChild(db);
 tr.appendChild(td);mct.appendChild(tr);});
+  }catch(e){bar.textContent='Error: '+e.message;}
 }
 async function addMcp(){let headers;try{const v=document.getElementById('m_headers').value.trim();if(v)headers=JSON.parse(v);}catch(e){alert('headers JSON invalid');return;}const cfg={name:document.getElementById('m_name').value,url:document.getElementById('m_url').value||undefined,command:document.getElementById('m_cmd').value||undefined,transport:document.getElementById('m_tr').value,headers};await fetch('/api/mcp',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify(cfg)});resetMcpForm();refresh();}
 function resetMcpForm(){document.getElementById('m_name').value='';document.getElementById('m_name').readOnly=false;document.getElementById('m_url').value='';document.getElementById('m_cmd').value='';document.getElementById('m_tr').value='http';document.getElementById('m_headers').value='';document.getElementById('m_submit').textContent='追加';}
