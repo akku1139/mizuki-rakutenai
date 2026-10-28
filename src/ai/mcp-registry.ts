@@ -4,7 +4,7 @@
 
 import { config, get } from '../config.ts';
 import { log, error } from '../log.ts';
-import { connectMcp, flattenToolName, type McpConnection, type McpServerConfig, type McpTool } from './mcp.ts';
+import { connectMcp, flattenToolName, splitToolName, type McpConnection, type McpServerConfig, type McpTool } from './mcp.ts';
 
 interface State {
   cfg: McpServerConfig;
@@ -81,7 +81,7 @@ export const getMcpTools = (): McpTool[] =>
   [...states.values()].filter(s => s.status === 'connected').flatMap(s => s.tools);
 
 export const callMcpTool = async (flatName: string, args: unknown): Promise<{ ok: boolean; text: string } | null> => {
-  const parts = (await import('./mcp.ts')).splitToolName(flatName);
+  const parts = splitToolName(flatName);
   if (!parts) return null;
   const st = states.get(parts.server);
   if (!st) return { ok: false, text: `no such MCP server: ${parts.server}` };
