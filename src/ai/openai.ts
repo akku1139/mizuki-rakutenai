@@ -33,8 +33,24 @@ const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
 const COMPACT_AT_SHARE = 0.75;
 /** compact のあと、生のまま残す直近のトークン数 */
 const KEEP_RECENT_TOKENS = 15_000;
-/** 要約に連続で失敗したら、自動 compact を諦める (毎ターン無駄な呼び出しをしない) */
+/** 要約に連続で失敗したら、要約は諦めて捨てるだけにする (毎ターン無駄な呼び出しをしない) */
 const MAX_COMPACT_FAILURES = 3;
+/** 予算のこの割合を使ったら、要約の前に古いツール出力を削る (teapot の `PRUNE_AT_SHARE`) */
+const PRUNE_AT_SHARE = 0.95;
+/** これより短いツール出力は削らない */
+const PRUNE_MIN_CHARS = 3_000;
+/** 削るときに残す先頭の文字数 */
+const PRUNE_KEEP_CHARS = 400;
+/** 出力が長いだけで、消しても会話が続くツール (teapot の `PRUNABLE_TOOLS` の mizuki 版) */
+const PRUNABLE_TOOLS = new Set([
+  'fetch_message', 'fetch_messages_history', 'search_messages',
+  'wikipedia_search', 'wikipedia_read', 'read_web', 'search_web', 'run_tool',
+]);
+/**
+ * 1 つのツール出力を履歴に積む上限 (文字)。compact はリクエストの前にしか走らないので、
+ * 1 ラウンドで積む量を抑えないと、窓を超えて 400 になる (実測: 1M のモデルに 1,885,392 トークン)。
+ */
+const MAX_TOOL_RESULT_CHARS = 50_000;
 // ツール実行の再生成上限は撤廃 (モデルが tool_calls を返し続ける限りループする)
 const MAX_TEXT_ATTACHMENT_CHARS = 20_000;
 
@@ -260,13 +276,113 @@ export class OpenAICompatChat implements ChatSession {
   async #maybeCompact(): Promise<void> {
     const budget = await this.#contextBudget();
     if (budget <= 0) return;
-    if (this.#compactFailures >= MAX_COMPACT_FAILURES) return;
     if (this.#history.length <= this.#compactedAtLen) return;
+    if (contextTokens(this.#history, this.#lastInputTokens) < budget) return;
 
-    const before = contextTokens(this.#history, this.#lastInputTokens);
-    if (before < budget) return;
+    // 1) まず古いツール出力を削る。要約よりずっと安く、原文の頭は残る (teapot の maybePrune)
+    const pruned = this.#pruneOldToolResults(budget, true);
+    if (pruned > 0 && contextTokens(this.#history, this.#lastInputTokens) < budget) {
+      this.#compactedAtLen = this.#history.length;
+      return;
+    }
 
-    // 直近を生のまま残す位置を後ろから探す
+    // 2) それでも足りなければ、古い方を要約 1 通に置き換える。
+    //    要約に失敗しても、捨ててでも必ず予算に収める (縮めないと次のリクエストが 400 で
+    //    セッションごと捨てられる。実測: 1M のモデルに 1,885,392 トークンを送って 400)。
+    //    回数では打ち切らない (打ち切ると、そのターンの残りが無防備になる)
+    for (;;) {
+      const before = contextTokens(this.#history, this.#lastInputTokens);
+      if (before < budget) return;
+      const lengthBefore = this.#history.length;
+
+      const cut = this.#keepRecentCut(budget);
+      if (cut <= 0) {
+        // 直近の tool 交換しか残っておらず、履歴としてはもう削れない。
+        // 保護範囲より前にもう無いなら、保護範囲も削る
+        if (!this.#pruneOldToolResults(budget, true, 0)) return;
+        continue;
+      }
+      // 残す側だけで予算を使い切っているなら、要約しても収まらない (要約を呼ぶと、
+      // 1 件消したうえに要約の文面で逆に増える)。まず保護範囲も削り、それでも駄目なら捨てる
+      const keptOverBudget = contextTokens(this.#history.slice(cut)) >= budget;
+      if (keptOverBudget && this.#pruneOldToolResults(budget, true, 0) > 0) continue;
+
+      const summarizable = !keptOverBudget && this.#compactFailures < MAX_COMPACT_FAILURES;
+      const { summary, cut: appliedCut } = summarizable
+        ? await this.#summarizeWithShrink(cut)
+        : { summary: '', cut };
+
+      if (summary !== '') {
+        this.#lastSummary = summary;
+        this.#compactFailures = 0;
+        this.#history = [
+          { role: 'user', content: summaryMessage(summary, appliedCut) },
+          ...this.#history.slice(appliedCut),
+        ];
+      } else {
+        // 要約できなかった (または連続失敗で諦めた)。要約の代わりに古い方を捨てる。
+        // 直近 (keepRecentCut が残した分) はそのまま残る
+        this.#history = [
+          { role: 'user', content: droppedMessage(appliedCut) },
+          ...this.#history.slice(appliedCut),
+        ];
+      }
+
+      // compact は履歴の書き換えなので、失敗時の巻き戻し先も今の履歴に付け替える
+      this.#historyBeforeTurn = [...this.#history];
+      this.#compactedAtLen = this.#history.length;
+      this.#lastInputTokens = undefined;
+      log(`compact: ${appliedCut} 件を${summary === '' ? '破棄' : '要約'} (${before} → ${contextTokens(this.#history)})`);
+      if (this.#history.length >= lengthBefore) return;
+    }
+  }
+
+  /**
+   * 古いツール出力を削る (teapot の `maybePrune` の移植)。
+   * 直近 (予算と同じだけのトークン) は触らない。削った件数を返す。
+   *
+   * teapot は保護範囲を `budget * 2` 文字で数えるが、それは英語 (4 文字 / トークン) 前提で、
+   * 日本語 (1.2 トークン / 文字) だと全履歴が保護範囲に入って 1 件も削れない。
+   * ここではトークンで数える。
+   */
+  #pruneOldToolResults(budget: number, force: boolean, protectShare = 1): number {
+    const estimate = contextTokens(this.#history, this.#lastInputTokens);
+    if (!force && estimate < budget * PRUNE_AT_SHARE) return 0;
+
+    const protectTokens = budget * protectShare;
+    let seen = 0;
+    let boundary = this.#history.length;
+    for (let i = this.#history.length - 1; i >= 0; i--) {
+      seen += estimateTokens([this.#history[i]!]);
+      boundary = i;
+      if (seen >= protectTokens) break;
+    }
+
+    const callerTool = new Map<string, string>();
+    for (const message of this.#history) {
+      const calls = (message as { tool_calls?: Array<{ id: string, function: { name: string } }> }).tool_calls;
+      for (const call of calls ?? []) callerTool.set(call.id, call.function.name);
+    }
+
+    let count = 0;
+    let saved = 0;
+    for (let i = 0; i < boundary; i++) {
+      const message = this.#history[i]!;
+      if (message.role !== 'tool' || typeof message.content !== 'string') continue;
+      const name = callerTool.get((message as { tool_call_id?: string }).tool_call_id ?? '') ?? '';
+      if (!PRUNABLE_TOOLS.has(name) && !name.startsWith('mcp__')) continue;
+      if (message.content.length <= PRUNE_MIN_CHARS) continue;
+      const length = message.content.length;
+      saved += length - PRUNE_KEEP_CHARS;
+      message.content = `${message.content.slice(0, PRUNE_KEEP_CHARS)}\n…[pruned ${length.toLocaleString()} bytes of ${name || 'tool'} output]`;
+      count++;
+    }
+    if (count > 0) log(`compact: 古いツール出力 ${count} 件を削った (${saved.toLocaleString()} 文字)`);
+    return count;
+  }
+
+  /** 直近を生のまま残す位置。tool 呼び出しの対応は割らない */
+  #keepRecentCut(budget: number): number {
     const keepTokens = Math.min(KEEP_RECENT_TOKENS, Math.max(1, Math.floor(budget / 4)));
     let cut = -1;
     let kept = 0;
@@ -277,40 +393,28 @@ export class OpenAICompatChat implements ChatSession {
     }
     // 直近の 1 通だけで予算を使い切るような巨大なメッセージでも、必ず前進させる
     if (cut < 1) cut = this.#history.length - 1;
-    cut = safeCutPoint(this.#history, cut);
-    if (cut <= 0) return;
+    return safeCutPoint(this.#history, cut);
+  }
 
-    const old = this.#history.slice(0, cut);
-    let summary = '';
-    try {
-      summary = stripAnalysis(await this.#summarize(old));
-    } catch (err) {
-      this.#compactFailures += 1;
-      log('compact: summarize failed, dropping the old part instead:', err instanceof Error ? err.message : err);
+  /**
+   * 古い方を要約する。窓に収まらず失敗したら、対象を 6 割に縮めて 1 回だけやり直す
+   * (teapot の `SUMMARIZE_SHRINK`)。それでも駄目なら空文字を返し、呼び出し側が捨てる。
+   */
+  async #summarizeWithShrink(cut: number): Promise<{ summary: string, cut: number }> {
+    let attemptCut = cut;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const summary = stripAnalysis(await this.#summarize(this.#history.slice(0, attemptCut)));
+        if (summary !== '') return { summary, cut: attemptCut };
+      } catch (err) {
+        log('compact: summarize failed:', err instanceof Error ? err.message : err);
+      }
+      const smaller = safeCutPoint(this.#history, Math.max(1, Math.floor(attemptCut * 0.6)));
+      if (smaller <= 0 || smaller >= attemptCut) break;
+      attemptCut = smaller;
     }
-
-    if (summary !== '') {
-      this.#lastSummary = summary;
-      this.#compactFailures = 0;
-      this.#history = [
-        { role: 'user', content: summaryMessage(summary, old.length) },
-        ...this.#history.slice(cut),
-      ];
-    } else {
-      // 要約できなかった。捨てる量を半分にして、リクエストが通る形だけ作る
-      const halfCut = safeCutPoint(this.#history, Math.max(1, Math.floor(cut / 2)));
-      if (halfCut <= 0) return;
-      this.#history = [
-        { role: 'user', content: droppedMessage(halfCut) },
-        ...this.#history.slice(halfCut),
-      ];
-    }
-
-    // compact は履歴の書き換えなので、失敗時の巻き戻し先も今の履歴に付け替える
-    this.#historyBeforeTurn = [...this.#history];
-    this.#compactedAtLen = this.#history.length;
-    this.#lastInputTokens = undefined;
-    log(`compact: ${old.length} 件を${summary === '' ? '破棄' : '要約'} (${before} → ${contextTokens(this.#history)})`);
+    this.#compactFailures += 1;
+    return { summary: '', cut: attemptCut };
   }
 
   /** 古い履歴を 1 通のメモに圧縮する。前回のメモがあれば更新させる */
@@ -493,10 +597,13 @@ export class OpenAICompatChat implements ChatSession {
           data: { name: c.name, ok: result[0], value: result[0] ? undefined : result[1] },
         };
 
+        // JSON.stringify(undefined) は undefined になり、content の無い tool メッセージになる
+        const raw = JSON.stringify(result[1]) ?? 'null';
         this.#history.push({
           role: 'tool',
-          // JSON.stringify(undefined) は undefined になり、content の無い tool メッセージになる
-          content: JSON.stringify(result[1]) ?? 'null',
+          content: raw.length > MAX_TOOL_RESULT_CHARS
+            ? `${raw.slice(0, MAX_TOOL_RESULT_CHARS)}\n…[ツール出力が長いため ${(raw.length - MAX_TOOL_RESULT_CHARS).toLocaleString()} 文字を省略しました]`
+            : raw,
           tool_call_id: c.id,
         });
       }

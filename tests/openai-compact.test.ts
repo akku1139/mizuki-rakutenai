@@ -110,18 +110,61 @@ test('要約に失敗したら古い方を捨てて、リクエストは通す',
   assert.ok(calls >= 2);
 });
 
-test('要約が続けて失敗したら、自動 compact を諦める', async t => {
+test('要約が続けて失敗しても、捨ててでも予算に収める', async t => {
+  resetModelMetaCache();
   const bodies: Body[] = [];
-  t.mock.method(globalThis, 'fetch', async (_url: string, init: RequestInit) => {
-    const body = JSON.parse(String(init.body)) as Body;
+  let rounds = 0;
+  t.mock.method(globalThis, 'fetch', async (url: string, init?: RequestInit) => {
+    const target = String(url);
+    if (target === 'https://models.dev/api.json') return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    if (target.endsWith('/models')) return new Response('nope', { status: 404 });
+    const body = JSON.parse(String(init!.body)) as Body;
     bodies.push(body);
-    return body.stream === false ? new Response('boom', { status: 500 }) : stream('ok');
+    if (body.stream === false) return new Response('boom', { status: 500 }); // 要約は常に失敗
+    if (body.messages.at(-1)!.role === 'tool') rounds++;
+    if (rounds >= 12) return stream('done');
+    return new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `c${rounds}`, function: { name: 'custom_tool', arguments: '{}' } }] } }] })}\n\ndata: [DONE]\n\n`);
   });
-  const chat = new OpenAICompatChat({ baseUrl: 'https://llm.invalid/v1', apiKey: 'k', model: 'm', contextWindowTokens: 1_000 });
-  for (let i = 0; i < 8; i++) await chat.sendMessage({ contents: [{ type: 'text', text: big(400) }] }).next();
+  // 削れないツール (PRUNABLE_TOOLS でも mcp__ でもない) なので、捨てるしかない
+  const chat = new OpenAICompatChat({ baseUrl: 'https://llm.invalid/v1', apiKey: 'k', model: 'm', contextWindowTokens: 1_000 }, {
+    definitions: [{ type: 'function', function: { name: 'custom_tool' } }],
+    execute: async () => [true, { rows: 'あ'.repeat(1_000) }],   // 1 往復 ≒ 1,200 トークン
+  });
+  for await (const _event of chat.sendMessage({ contents: [{ type: 'text', text: 'q' }] })) { /* drain */ }
 
-  // 要約の試行は 3 回まで (MAX_COMPACT_FAILURES)、そのあとは呼ばない
-  assert.equal(bodies.filter(b => b.stream === false).length, 3);
+  const summarizeCalls = bodies.filter(b => b.stream === false).length;
+  // 要約の試行は 3 回まで (1 回につき縮めて 1 回やり直すので最大 6 回) で止める
+  assert.ok(summarizeCalls <= 6, `要約を試しすぎている: ${summarizeCalls}`);
+  // それでも捨てて縮め続ける (諦めると 1 ターンで窓を超えて 400 になる)
+  assert.ok(bodies.some(b => JSON.stringify(b.messages).includes('破棄されました')), '破棄して縮めていない');
+  const largest = Math.max(...bodies.filter(b => b.stream !== false).map(b => JSON.stringify(b.messages).length));
+  assert.ok(largest < 20_000, `履歴が伸び続けている: ${largest} 文字`);
+});
+
+test('1 つのツール出力は履歴に積む時点で切り詰める', async t => {
+  resetModelMetaCache();
+  const bodies: Body[] = [];
+  let rounds = 0;
+  t.mock.method(globalThis, 'fetch', async (url: string, init?: RequestInit) => {
+    const target = String(url);
+    if (target === 'https://models.dev/api.json') return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    if (target.endsWith('/models')) return new Response('nope', { status: 404 });
+    const body = JSON.parse(String(init!.body)) as Body;
+    bodies.push(body);
+    if (body.stream === false) return completion('- 要約');
+    if (body.messages.at(-1)!.role === 'tool') rounds++;
+    if (rounds >= 1) return stream('done');
+    return new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 's', arguments: '{}' } }] } }] })}\n\ndata: [DONE]\n\n`);
+  });
+  const chat = new OpenAICompatChat({ baseUrl: 'https://llm.invalid/v1', apiKey: 'k', model: 'm', contextWindowTokens: 10_000_000 }, {
+    definitions: [{ type: 'function', function: { name: 's' } }],
+    execute: async () => [true, { rows: 'あ'.repeat(200_000) }],
+  });
+  for await (const _event of chat.sendMessage({ contents: [{ type: 'text', text: 'q' }] })) { /* drain */ }
+
+  const tool = bodies.at(-1)!.messages.find(m => m.role === 'tool')!;
+  assert.ok(String(tool.content).length < 51_000, `切り詰めていない: ${String(tool.content).length} 文字`);
+  assert.match(String(tool.content), /省略しました/);
 });
 
 test('compact は tool 呼び出しとその結果の対応を割らない', async t => {
@@ -203,7 +246,7 @@ test('カタログに無ければ既定の 128k で compact する', async t => 
     if (body.stream === false) return completion('- 要約');
     if (body.messages.at(-1)!.role === 'tool') rounds++;
     if (rounds >= 20) return stream('done');
-    return new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `c${rounds}`, function: { name: 's', arguments: '{}' } }] } }] })}\n\ndata: [DONE]\n\n`);
+    return new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `c${rounds}`, function: { name: 'custom_tool', arguments: '{}' } }] } }] })}\n\ndata: [DONE]\n\n`);
   });
 
   const chat = new OpenAICompatChat({ baseUrl: 'https://llm.invalid/v1', apiKey: 'k', model: 'unknown-model' }, {
@@ -213,4 +256,72 @@ test('カタログに無ければ既定の 128k で compact する', async t => 
   for await (const _event of chat.sendMessage({ contents: [{ type: 'text', text: 'q' }] })) { /* drain */ }
 
   assert.ok(bodies.some(b => b.stream === false), '既定の窓で compact していない');
+});
+
+test('古いツール出力は要約の前に削られ、直近は残る (teapot の maybePrune)', async t => {
+  resetModelMetaCache();
+  const bodies: Body[] = [];
+  let rounds = 0;
+  t.mock.method(globalThis, 'fetch', async (url: string, init?: RequestInit) => {
+    const target = String(url);
+    if (target === 'https://models.dev/api.json') return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    if (target.endsWith('/models')) return new Response('nope', { status: 404 });
+    const body = JSON.parse(String(init!.body)) as Body;
+    bodies.push(body);
+    if (body.stream === false) return completion('- 要約');
+    if (body.messages.at(-1)!.role === 'tool') rounds++;
+    if (rounds >= 4) return stream('done');
+    // 1 ラウンドで 10 本並列に呼ぶ (本番の notion 連打と同じ形)
+    const calls = Array.from({ length: 10 }, (_, i) => ({ index: i, id: `c${rounds}_${i}`, function: { name: 'fetch_messages_history', arguments: '{}' } }));
+    return new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: calls } }] })}\n\ndata: [DONE]\n\n`);
+  });
+  const chat = new OpenAICompatChat({ baseUrl: 'https://llm.invalid/v1', apiKey: 'k', model: 'm', contextWindowTokens: 200_000 }, {
+    definitions: [{ type: 'function', function: { name: 'fetch_messages_history' } }],
+    execute: async () => [true, { rows: 'あ'.repeat(20_000) }],   // 1 本 ≒ 24,000 トークン
+  });
+  for await (const _event of chat.sendMessage({ contents: [{ type: 'text', text: 'q' }] })) { /* drain */ }
+
+  const last = bodies.at(-1)!;
+  const pruned = last.messages.filter(m => typeof m.content === 'string' && m.content.includes('pruned'));
+  assert.ok(pruned.length > 0, '古いツール出力を削っていない');
+  // 削ったものは頭 400 文字 + 注記だけになる
+  for (const message of pruned) assert.ok(String(message.content).length < 1_000);
+  // 削っても、ツール呼び出しと結果の対応は保たれている
+  for (const message of last.messages) {
+    if (message.role !== 'assistant' || !message.tool_calls?.length) continue;
+    for (const call of message.tool_calls) {
+      assert.ok(last.messages.some(m => m.role === 'tool' && m.tool_call_id === call.id));
+    }
+  }
+  // 削るだけで予算に収まるなら、要約は呼ばない (余計な API 呼び出しをしない)
+  assert.equal(bodies.filter(b => b.stream === false).length, 0);
+  // 予算 (150,000 トークン) を超えていない
+  const largest = Math.max(...bodies.filter(b => b.stream !== false).map(b => JSON.stringify(b.messages).length));
+  assert.ok(largest < 150_000 * 1.2, `履歴が予算を超えている: ${largest} 文字`);
+});
+
+test('削っても収まらないときは、保護範囲も削ってから要約する', async t => {
+  resetModelMetaCache();
+  const bodies: Body[] = [];
+  let rounds = 0;
+  t.mock.method(globalThis, 'fetch', async (url: string, init?: RequestInit) => {
+    const target = String(url);
+    if (target === 'https://models.dev/api.json') return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    if (target.endsWith('/models')) return new Response('nope', { status: 404 });
+    const body = JSON.parse(String(init!.body)) as Body;
+    bodies.push(body);
+    if (body.stream === false) return completion('- 要約');
+    if (body.messages.at(-1)!.role === 'tool') rounds++;
+    if (rounds >= 6) return stream('done');
+    return new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `c${rounds}`, function: { name: 'fetch_messages_history', arguments: '{}' } }] } }] })}\n\ndata: [DONE]\n\n`);
+  });
+  const chat = new OpenAICompatChat({ baseUrl: 'https://llm.invalid/v1', apiKey: 'k', model: 'm', contextWindowTokens: 100_000 }, {
+    definitions: [{ type: 'function', function: { name: 'fetch_messages_history' } }],
+    execute: async () => [true, { rows: 'あ'.repeat(20_000) }],   // 予算 75,000 に対して 1 本 24,000 トークン
+  });
+  for await (const _event of chat.sendMessage({ contents: [{ type: 'text', text: 'q' }] })) { /* drain */ }
+
+  assert.ok(bodies.some(b => b.stream === false), '要約に進んでいない');
+  const largest = Math.max(...bodies.filter(b => b.stream !== false).map(b => JSON.stringify(b.messages).length));
+  assert.ok(largest < 100_000, `履歴が伸び続けている: ${largest} 文字`);
 });
