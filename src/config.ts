@@ -80,6 +80,10 @@ const readConfig = (): Config => {
 
 export const config: Config = readConfig();
 
+export const saveConfig = (): void => {
+  fs.writeFileSync('./data/config.json', JSON.stringify(config, null, 2));
+};
+
 /** ネストしたキーを安全に取り出す。無ければ fallback */
 export const get = (obj: Config, path: string, fallback?: any): any => {
   const parts = path.split('.');

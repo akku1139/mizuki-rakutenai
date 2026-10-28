@@ -40,6 +40,23 @@ export const applyMcpConfigs = (configs: McpServerConfig[]): void => {
   }
 };
 
+export const connectMcpServer = async (name: string): Promise<void> => {
+  const st = states.get(name);
+  if (!st) throw new Error(`no such MCP server: ${name}`);
+  st.status = 'connecting';
+  st.lastError = undefined;
+  try {
+    const conn = await connectMcp(st.cfg);
+    st.conn = conn;
+    st.tools = await conn.tools();
+    st.status = 'connected';
+  } catch (e: any) {
+    st.status = 'error';
+    st.lastError = e?.message ?? String(e);
+    throw e;
+  }
+};
+
 export const connectAllMcp = async (): Promise<void> => {
   const cfgs = get(config, 'mcpServers', []) as McpServerConfig[];
   applyMcpConfigs(cfgs);
