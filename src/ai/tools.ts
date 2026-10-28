@@ -209,11 +209,11 @@ const searchMessages: AITool = {
 /// fetch_messages_history: 特定メッセージ周辺の履歴を取得
 
 const fetchMessagesHistory: AITool = {
-  description: 'Discordのチャンネル履歴を取得します。anchor 未指定ならチャンネルの最新メッセージを起点にします。',
+  description: 'Discordのチャンネル履歴を取得します。anchor 未指定ならチャンネルの最新メッセージを起点にします。channel 未指定で anchor が別チャンネルのメッセージを指す場合は、そのチャンネルを解決します。',
   parametersJsonSchema: {
     type: 'object',
     properties: {
-      channel: { type: 'string', description: 'チャンネルURLまたは <#id>。未指定なら現在のチャンネル' },
+      channel: { type: 'string', description: 'チャンネルURLまたは <#id>。未指定なら anchor または現在のチャンネル' },
       anchor: { type: 'string', description: '起点メッセージのURLまたはID。未指定ならチャンネルの最新メッセージ' },
       direction: {
         type: 'string',
@@ -226,7 +226,9 @@ const fetchMessagesHistory: AITool = {
   async execute({ channel: channelArg, anchor, direction, limit }, { msg }) {
     try {
       let ch = msg.channel as unknown as HistoryChannel;
-      if (channelArg !== undefined && channelArg !== '') {
+      const channelExplicit = channelArg !== undefined && channelArg !== '';
+
+      if (channelExplicit) {
         const mention = /<#(\d+)>/.exec(String(channelArg));
         const parsed = parseMessageUrl(String(channelArg));
         if (mention?.[1]) {
@@ -243,11 +245,6 @@ const fetchMessagesHistory: AITool = {
         }
       }
 
-      if ((config.blacklistedChannels ?? []).includes(ch.id)) return [false, { error: 'このチャンネルはブラックリストです' }];
-      const chParentId = (ch as { parentId?: string | null }).parentId;
-      if (chParentId && (config.blacklistedChannels ?? []).includes(chParentId)) return [false, { error: 'このチャンネルはブラックリストです' }];
-      const chGuildId = (ch as { guildId?: string; guild?: { id?: string } }).guildId ?? (ch as { guild?: { id?: string } }).guild?.id;
-      if (msg.guild && chGuildId && chGuildId !== msg.guild.id) return [false, { error: '別サーバーのチャンネルにはアクセスできません' }];
       const dir = direction === 'after' || direction === 'around' ? direction : 'before';
       const lim = typeof limit === 'number' ? Math.min(Math.max(Math.trunc(limit), 1), 100) : 30;
 
@@ -255,10 +252,40 @@ const fetchMessagesHistory: AITool = {
       if (anchor !== undefined && anchor !== '') {
         const parsed = parseMessageUrl(String(anchor));
         anchorId = parsed?.messageId ?? String(anchor);
+        // channel 未指定時は anchor が存在するチャンネルを解決する
+        if (!channelExplicit) {
+          if (parsed?.channelId) {
+            const client = clientForUrl(String(anchor), msg.client as Client<boolean>);
+            const fetched = await client.channels.fetch(parsed.channelId);
+            if (fetched?.isTextBased()) ch = fetched as unknown as HistoryChannel;
+          } else if (msg.guild) {
+            for (const c of msg.guild.channels.cache.values()) {
+              if (!c.isTextBased()) continue;
+              try {
+                const m = await (c as any).messages.fetch(anchorId);
+                if (m) { ch = c as unknown as HistoryChannel; break; }
+              } catch {}
+            }
+            // スレッドも検索
+            for (const t of (msg.guild as any).threads?.cache?.values?.() ?? []) {
+              try {
+                const m = await t.messages.fetch(anchorId);
+                if (m) { ch = t as unknown as HistoryChannel; break; }
+              } catch {}
+            }
+          }
+        }
       } else {
         const latest = await ch.messages.fetch({ limit: 1 });
         anchorId = [...latest.values()][0]?.id;
+        if (!anchorId && msg.id) anchorId = msg.id;
       }
+
+      if ((config.blacklistedChannels ?? []).includes(ch.id)) return [false, { error: 'このチャンネルはブラックリストです' }];
+      const chParentId = (ch as { parentId?: string | null }).parentId;
+      if (chParentId && (config.blacklistedChannels ?? []).includes(chParentId)) return [false, { error: 'このチャンネルはブラックリストです' }];
+      const chGuildId = (ch as { guildId?: string; guild?: { id?: string } }).guildId ?? (ch as { guild?: { id?: string } }).guild?.id;
+      if (msg.guild && chGuildId && chGuildId !== msg.guild.id) return [false, { error: '別サーバーのチャンネルにはアクセスできません' }];
 
       const fetchOpts: Record<string, unknown> = { cache: false, limit: lim };
       if (anchorId) fetchOpts[dir === 'after' ? 'after' : dir === 'before' ? 'before' : 'around'] = anchorId;
@@ -271,7 +298,7 @@ const fetchMessagesHistory: AITool = {
       items.sort((a: any, b: any) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
 
       return [true, {
-        channel: { id: ch.id, name: ch.name },
+        channel: { id: ch.id, name: (ch as unknown as { name?: string }).name },
         anchor: anchorId,
         direction: dir,
         count: items.length,
