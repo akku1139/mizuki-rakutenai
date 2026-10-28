@@ -76,7 +76,10 @@ export const connectMcpServer = async (name: string): Promise<void> => {
     const needsAuth = e?.status === 401 || e?.status === 403 || /unauthoriz|invalid_token|authorization required/i.test(e?.message ?? '');
     if (needsAuth) {
       st.oauthRequired = true;
-      st.lastError = 'this server requires OAuth — use authorize';
+      st.lastError = 'this server requires OAuth — starting authorization';
+      void startMcpOAuth(name).catch(err => {
+        st.lastError = err?.message ?? String(err);
+      });
     }
     throw e;
   }
