@@ -58,7 +58,9 @@ export const setupAdmin = (): void => {
     return;
   }
   if (parsed.pathname === '/api/mcp' && req.method === 'GET') {
-    json(res, 200, getMcpStatus());
+    const statuses = new Map(getMcpStatus().map(s => [s.name, s]));
+    const out = (config.mcpServers ?? []).map(c => ({ ...c, ...(statuses.get(c.name) ?? {}) }));
+    json(res, 200, out);
     return;
   }
   if (parsed.pathname === '/api/mcp' && req.method === 'POST') {
