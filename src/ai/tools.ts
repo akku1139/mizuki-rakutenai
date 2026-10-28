@@ -118,6 +118,8 @@ const fetchMessage: AITool = {
       const channel = await client.channels.fetch(parsed.channelId);
       if (!channel?.isTextBased()) return [false, { error: 'チャンネルを取得できませんでした' }];
       if ((config.blacklistedChannels ?? []).includes(parsed.channelId)) return [false, { error: 'このチャンネルはブラックリストです' }];
+      const channelParentId = (channel as { parentId?: string | null }).parentId;
+      if (channelParentId && (config.blacklistedChannels ?? []).includes(channelParentId)) return [false, { error: 'このチャンネルはブラックリストです' }];
       const channelGuildId = (channel as { guildId?: string; guild?: { id?: string } }).guildId ?? (channel as { guild?: { id?: string } }).guild?.id;
       if (msg.guild && channelGuildId && channelGuildId !== msg.guild.id) return [false, { error: '別サーバーのチャンネルにはアクセスできません' }];
       const message = await channel.messages.fetch(parsed.messageId) as Message<boolean>;
@@ -166,6 +168,8 @@ const fetchMessagesHistory: AITool = {
       }
 
       if ((config.blacklistedChannels ?? []).includes(ch.id)) return [false, { error: 'このチャンネルはブラックリストです' }];
+      const chParentId = (ch as { parentId?: string | null }).parentId;
+      if (chParentId && (config.blacklistedChannels ?? []).includes(chParentId)) return [false, { error: 'このチャンネルはブラックリストです' }];
       const chGuildId = (ch as { guildId?: string; guild?: { id?: string } }).guildId ?? (ch as { guild?: { id?: string } }).guild?.id;
       if (msg.guild && chGuildId && chGuildId !== msg.guild.id) return [false, { error: '別サーバーのチャンネルにはアクセスできません' }];
       const dir = direction === 'after' || direction === 'around' ? direction : 'before';

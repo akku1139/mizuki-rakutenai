@@ -122,7 +122,10 @@ export const setupAdmin = (): void => {
       for (const g of client.guilds.cache.values()) {
         for (const c of g.channels.cache.values()) {
           if (!c.isTextBased()) continue;
-          out.push({ id: c.id, name: `${g.name} / ${c.name}`, platform, blacklisted: (config.blacklistedChannels ?? []).includes(c.id) });
+          out.push({ id: c.id, name: `${g.name} / ${c.name}`, platform, blacklisted: (config.blacklistedChannels ?? []).includes(c.id) || (!!c.parentId && (config.blacklistedChannels ?? []).includes(c.parentId)) });
+        }
+        for (const t of (g as any).threads?.cache?.values?.() ?? []) {
+          out.push({ id: t.id, name: `${g.name} / #${t.parent?.name ?? '?'} / ${t.name}`, platform, blacklisted: (config.blacklistedChannels ?? []).includes(t.id) || (!!t.parentId && (config.blacklistedChannels ?? []).includes(t.parentId)) });
         }
       }
     }
@@ -135,11 +138,19 @@ export const setupAdmin = (): void => {
     req.on('end', () => {
       try {
         const { channelId, blacklisted } = JSON.parse(body);
+        // スレッドの場合は親チャンネルIDを保存する
+        let targetId = channelId;
+        for (const client of [discord, fluxer]) {
+          for (const g of client.guilds.cache.values()) {
+            const ch = g.channels.cache.get(channelId) ?? (g as any).threads?.cache?.get?.(channelId);
+            if (ch && 'parentId' in ch && ch.parentId) { targetId = ch.parentId; break; }
+          }
+        }
         config.blacklistedChannels = config.blacklistedChannels ?? [];
         if (blacklisted) {
-          if (!config.blacklistedChannels.includes(channelId)) config.blacklistedChannels.push(channelId);
+          if (!config.blacklistedChannels.includes(targetId)) config.blacklistedChannels.push(targetId);
         } else {
-          config.blacklistedChannels = config.blacklistedChannels.filter(x => x !== channelId);
+          config.blacklistedChannels = config.blacklistedChannels.filter(x => x !== targetId);
         }
         saveConfig();
         json(res, 200, { ok: true });
