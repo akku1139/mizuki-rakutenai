@@ -4,22 +4,71 @@
 
 import fs from 'node:fs';
 
+export interface OpenAIProfile {
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+}
+
+export interface Config {
+  discord?: {
+    token?: string;
+    logWebhookUrl?: string;
+    botUserId?: string;
+    guildId?: string;
+  };
+  fluxer?: {
+    token?: string;
+    logWebhookId?: string;
+    logWebhookToken?: string;
+    botUserId?: string;
+    guildId?: string;
+    apiBase?: string;
+    cdnBase?: string;
+  };
+  ai?: {
+    defaultProvider?: string;
+    openaiProfiles?: Record<string, OpenAIProfile>;
+    activeOpenaiProfile?: string | null;
+    readabilityEndpoint?: string | null;
+    searchEndpoint?: string | null;
+  };
+  miq?: {
+    token?: string | null;
+    baseUrl?: string;
+  };
+  fluxsync?: {
+    setupAllowedUserId?: string;
+  };
+  coinwatch?: {
+    channelId?: string;
+    symbol?: string;
+  };
+  purge?: {
+    allowedRoleId?: string;
+  };
+  admin?: {
+    port?: number;
+    token?: string;
+  };
+}
+
 const CONFIG_PATH = './data/config.json';
 
-const readConfig = (): Record<string, any> => {
+const readConfig = (): Config => {
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) as Record<string, any>;
+    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) as Config;
   } catch {
     return {};
   }
 };
 
-export const config = readConfig();
+export const config: Config = readConfig();
 
 /** ネストしたキーを安全に取り出す。無ければ fallback */
-export const get = (obj: any, path: string, fallback?: any): any => {
+export const get = (obj: Config, path: string, fallback?: any): any => {
   const parts = path.split('.');
-  let cur = obj;
+  let cur: any = obj;
   for (const p of parts) {
     if (cur == null || typeof cur !== 'object') return fallback;
     cur = cur[p];
