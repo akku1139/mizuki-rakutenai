@@ -46,12 +46,12 @@ export const applyMcpConfigs = (configs: McpServerConfig[]): void => {
   }
 };
 
-const authFor = async (name: string): Promise<ServerAuth | undefined> => {
+const authFor = async (name: string, redirectUrl = 'http://127.0.0.1/callback'): Promise<ServerAuth | undefined> => {
   if (!store) store = new McpAuthStore('./data');
   const existing = auths.get(name);
   if (existing) return existing;
   const stored = await store.get(name);
-  const auth = new ServerAuth(name, 'http://127.0.0.1/callback', (server, data) => store!.set(server, data));
+  const auth = new ServerAuth(name, redirectUrl, (server, data) => store!.set(server, data));
   await auth.hydrate(stored);
   auths.set(name, auth);
   return auth;
@@ -138,46 +138,63 @@ export const getMcpStatus = (): Array<{ name: string; status: string; toolCount:
 export const startMcpOAuth = async (name: string): Promise<{ url: string }> => {
   const st = states.get(name);
   if (!st) throw new Error(`no such MCP server: ${name}`);
+  if (!st.cfg.url) throw new Error('OAuth needs an http(s) url; a stdio server has no authorizer');
   const existing = flows.get(name);
   if (existing) await existing.close().catch(() => {});
-  const flow = await listenForCallback();
-  flows.set(name, flow);
-  const auth = await authFor(name);
-  if (!auth) throw new Error('auth unavailable');
-  const authArg = { provider: auth };
-  st.status = 'authorizing';
-  // trigger OAuth
-  connectMcp(st.cfg, authArg).then(async conn => {
+
+  const loop = await listenForCallback();
+  const auth = new ServerAuth(name, loop.redirectUrl, (server, data) => store!.set(server, data));
+  if (store) await auth.hydrate(await store.get(name));
+  auths.set(name, auth);
+
+  const pending = { redirectUrl: loop.redirectUrl, wait: loop.wait, close: loop.close };
+  flows.set(name, pending);
+
+  st.oauthRequired = true;
+  let pendingConn: McpConnection | null = null;
+  try {
+    const conn = await connectMcp(st.cfg, { provider: auth });
     st.conn = conn;
     st.tools = await conn.tools();
     st.status = 'connected';
     st.oauthRequired = false;
-    await flow.close().catch(() => {});
+    await loop.close().catch(() => {});
     flows.delete(name);
-  }).catch(async err => {
-    if (err?.connection) {
-      const conn = err.connection as McpConnection;
-      const { code, iss } = await flow.wait(FLOW_TIMEOUT_MS);
+    return { url: '' };
+  } catch (err: any) {
+    pendingConn = (err as { connection?: McpConnection }).connection ?? null;
+    const url = auth.pendingUrl?.() ?? (auth as any).authUrl?.toString?.();
+    if (!url) {
+      const message = err?.message ?? String(err);
+      auth.markError(message);
+      await loop.close().catch(() => {});
+      flows.delete(name);
+      throw new Error(`could not start the authorization flow: ${message}`);
+    }
+    st.status = 'authorizing';
+    void (async () => {
       try {
-        const newConn = await conn.finishAuth(code, iss);
-        st.conn = newConn;
-        st.tools = await newConn.tools();
+        const { code, iss } = await loop.wait(FLOW_TIMEOUT_MS);
+        const conn = pendingConn;
+        if (!conn) throw new Error('the authorization flow lost its connection');
+        const live = await conn.finishAuth(code, iss ?? auth.expectedIssuer());
+        await conn.close().catch(() => {});
+        st.conn = live;
+        st.tools = await live.tools();
         st.status = 'connected';
         st.oauthRequired = false;
+        st.lastError = undefined;
+        await loop.close().catch(() => {});
+        flows.delete(name);
       } catch (e: any) {
-        st.status = 'error';
-        st.lastError = e?.message ?? String(e);
+        const msg = e?.message ?? String(e);
+        auth.markError(msg);
+        if (st.status === 'authorizing') st.status = 'error';
+        st.lastError = msg;
+        await loop.close().catch(() => {});
+        flows.delete(name);
       }
-    } else {
-      st.status = 'error';
-      st.lastError = err?.message ?? String(err);
-    }
-    await flow.close().catch(() => {});
-    flows.delete(name);
-  });
-  // wait briefly for redirect URL
-  await new Promise(r => setTimeout(r, 200));
-  const url = auth.pendingUrl?.() ?? (auth as any).authUrl?.toString?.();
-  if (!url) throw new Error('failed to obtain authorization URL');
-  return { url };
+    })();
+    return { url };
+  }
 };
