@@ -369,7 +369,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
           case 'tool-call-detail':
             log('fc:', gen);
             toolCount.set(gen.data.name, (toolCount.get(gen.data.name) ?? 0) + 1);
-            const toolText = `-# ${gen.data.description !== '' ? `${gen.data.description} ` : ''}(${gen.data.name})...`
+            const toolText = `-# ${gen.data.description !== '' ? `${gen.data.description} ` : ''}(\`${gen.data.name}\`)...`
             if (!toolLogMsg)
               toolLogMsg = await m.channel.send(toolText);
             else
@@ -398,7 +398,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       }
 
       text = text.trim();
-      text += `\n-# model: ${chat.label}${toolCount.size > 0 ? ` (${Array.from(toolCount, ([k, v]) => `${k}: ${v}`).join(', ')})` : ""}${usage !== undefined ? ` (tokens: ${formatTokenUsage(usage)})` : ''}`;
+      text += `\n-# model: ${chat.label}${toolCount.size > 0 ? ` (${Array.from(toolCount, ([k, v]) => `\`${k}\`: ${v}`).join(', ')})` : ""}${usage !== undefined ? ` (tokens: ${formatTokenUsage(usage)})` : ''}`;
       const finalMsgs = await sendMessage(text, m, first);
       sentMessageIds.push(...finalMsgs.map(msg => msg.id));
       if (toolLogMsg) toolLogMsg.delete();
