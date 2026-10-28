@@ -68,7 +68,9 @@ export const setupAdmin = (): void => {
       try {
         const cfg = JSON.parse(body);
         config.mcpServers = config.mcpServers ?? [];
-        config.mcpServers.push(cfg);
+        const idx = config.mcpServers.findIndex(c => c.name === cfg.name);
+        if (idx >= 0) config.mcpServers[idx] = cfg;
+        else config.mcpServers.push(cfg);
         saveConfig();
         applyMcpConfigs(config.mcpServers);
         try { await connectMcpServer(cfg.name); } catch {}
