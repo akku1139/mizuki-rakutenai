@@ -11,7 +11,7 @@ export const buildSystemPrompt = async (guild?: Guild | null, provider?: string)
   const includeMcp = provider !== 'rakutenai';
   const mcpTools = includeMcp ? getMcpTools() : [];
   const hasNotion = getMcpStatus().some(s => s.status === 'connected' && /notion/i.test(s.name));
-  const notionHint = hasNotion ? 'Notion のページ・データベース操作が可能な場合は、ユーザーの依頼に関連する情報の確認や記録に積極的に Notion ツールを使ってください。記録内容は Wikipedia の記事並みに充実させ、必要に応じて Web 検索なども活用して多面的な観点から詳細に書いてください。記録する際はメッセージリンク、ユーザー名、ユーザーIDも併せて記録してください。Notion のページ URL はあなたにしか見えないため、Discord に貼ってはいけません。\\n' : '';
+  const notionHint = hasNotion ? 'Notion のページ・データベース操作が可能な場合は、ユーザーの依頼に関連する情報の確認や記録に積極的に Notion ツールを使ってください。Discord ユーザーごとに Notion ページを作成し、その人の特徴・好み・過去のやり取りなどを記録し、応答時に参考にしてください。記録内容は Wikipedia の記事並みに充実させ、必要に応じて Web 検索なども活用して多面的な観点から詳細に書いてください。記録する際はメッセージリンク、ユーザー名、ユーザーIDも併せて記録してください。Notion のページ URL はあなたにしか見えないため、Discord に貼ってはいけません。\\n' : '';
   const mcpSection = mcpTools.length > 0
     ? mcpTools.length > 20
       ? `===== MCP ツール =====
