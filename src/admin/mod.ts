@@ -10,6 +10,7 @@ import { getAIStatus } from '../ai/mod.ts';
 import { getAllPrefs } from '../ai/prefs.ts';
 import { getAnkas } from '../anka.ts';
 import { getSyncPairs } from '../fluxsync/mod.ts';
+import { enqueueJob, listJobs } from '../jobs/mod.ts';
 import { discord, fluxer } from '../clients.ts';
 import { getMcpStatus, applyMcpConfigs, connectMcpServer, startMcpOAuth } from '../ai/mcp-registry.ts';
 
@@ -175,6 +176,24 @@ export const setupAdmin = (): void => {
         }
         saveConfig();
         json(res, 200, { ok: true });
+      } catch (e: any) {
+        json(res, 400, { error: e?.message ?? String(e) });
+      }
+    });
+    return;
+  }
+  if (parsed.pathname === '/api/jobs' && req.method === 'GET') {
+    json(res, 200, listJobs());
+    return;
+  }
+  if (parsed.pathname === '/api/jobs' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const { type, channelId, prompt } = JSON.parse(body);
+        const job = enqueueJob(type ?? 'index', channelId ?? '', { prompt });
+        json(res, 200, job);
       } catch (e: any) {
         json(res, 400, { error: e?.message ?? String(e) });
       }
