@@ -10,7 +10,7 @@ import { getAIStatus } from '../ai/mod.ts';
 import { getAllPrefs } from '../ai/prefs.ts';
 import { getAnkas } from '../anka.ts';
 import { getSyncPairs } from '../fluxsync/mod.ts';
-import { enqueueJob, listJobs } from '../jobs/mod.ts';
+import { cancelJob, clearFinishedJobs, enqueueJob, getJob, jobSummary, listJobs } from '../jobs/mod.ts';
 import { discord, fluxer } from '../clients.ts';
 import { getMcpStatus, applyMcpConfigs, connectMcpServer, startMcpOAuth } from '../ai/mcp-registry.ts';
 
@@ -183,7 +183,14 @@ export const setupAdmin = (): void => {
     return;
   }
   if (parsed.pathname === '/api/jobs' && req.method === 'GET') {
-    json(res, 200, listJobs());
+    const id = parsed.searchParams.get('id');
+    if (id !== null) {
+      const job = getJob(id);
+      if (job === undefined) { json(res, 404, { error: 'no such job' }); return; }
+      json(res, 200, job);
+      return;
+    }
+    json(res, 200, { ...jobSummary(), jobs: listJobs() });
     return;
   }
   if (parsed.pathname === '/api/jobs' && req.method === 'POST') {
@@ -191,13 +198,30 @@ export const setupAdmin = (): void => {
     req.on('data', c => body += c);
     req.on('end', () => {
       try {
-        const { type, channelId, prompt } = JSON.parse(body);
-        const job = enqueueJob(type ?? 'index', channelId ?? '', { prompt });
-        json(res, 200, job);
+        const request = JSON.parse(body) as Parameters<typeof enqueueJob>[0];
+        json(res, 200, enqueueJob(request));
       } catch (e: any) {
         json(res, 400, { error: e?.message ?? String(e) });
       }
     });
+    return;
+  }
+  if (parsed.pathname === '/api/jobs/cancel' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const { id } = JSON.parse(body) as { id?: string };
+        if (typeof id !== 'string') { json(res, 400, { error: 'id required' }); return; }
+        json(res, 200, { ok: cancelJob(id) });
+      } catch (e: any) {
+        json(res, 400, { error: e?.message ?? String(e) });
+      }
+    });
+    return;
+  }
+  if (parsed.pathname === '/api/jobs/clear' && req.method === 'POST') {
+    json(res, 200, { removed: clearFinishedJobs() });
     return;
   }
   json(res, 404, { error: 'not found' });

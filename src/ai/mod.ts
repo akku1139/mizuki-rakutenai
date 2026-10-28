@@ -17,6 +17,7 @@ import { config, get } from '../config.ts';
 import { DISCORD_USER_ID, discord, FLUXER_USER_ID, fluxer } from '../clients.ts';
 import { whMapFluxer } from '../fluxsync/state.ts';
 import { createFileFromUrl, getFileName, isEffectivelyEmpty, splitLongString } from '../utils.ts';
+import { formatUsage, runAgent } from './agent.ts';
 import { buildContextBlock } from './context.ts';
 import { recall } from '../memory/recall.ts';
 import { loadMemory } from '../memory/store.ts';
@@ -166,23 +167,6 @@ const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, 
   return sentMessages;
 };
 
-const formatTokenUsage = (usage: Extract<AIEvent, { type: 'usage' }>['usage']): string => {
-  const input = usage.inputTokens.toLocaleString();
-  const output = usage.outputTokens.toLocaleString();
-
-  if (usage.cachedInputTokens === undefined) {
-    return `${input} in / ${output} out`;
-  }
-
-  const cached = usage.cachedInputTokens;
-  const uncached = Math.max(usage.inputTokens - cached, 0);
-  const cachedPercent = usage.inputTokens > 0
-    ? (cached / usage.inputTokens * 100).toFixed(1)
-    : '0.0';
-
-  return `${uncached.toLocaleString()} + ${cached.toLocaleString()} [${cachedPercent}% cached] in / ${output} out`;
-};
-
 const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
   if (
     !m.author.bot
@@ -252,8 +236,6 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       m.channel.sendTyping();
 
-      const toolCount = new Map<string, number>();
-
       // ★ 最後に自分が投稿したメッセージID（存在すれば after に指定）
       const lastBotMsgId = entry.lastIds.length > 0
         ? entry.lastIds[entry.lastIds.length - 1]  // 一番最後に送信したID
@@ -313,108 +295,103 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       log(m.id, `[${chat.label}]`, input);
 
-      const res = chat.sendMessage({
-        mode: "USER_INPUT",
-        contents: [
-          { type: 'text', text: input },
-          ...(files.map(f => ({ type: 'file', file: f } as const))),
-        ],
-        meta: { msg: m },
-      });
-
-      let text = '';
-      let c = 0;
-      let usage: Extract<AIEvent, { type: 'usage' }>['usage'] | undefined;
-
+      // エージェントループは共通実装 (src/ai/agent.ts)。ここは Discord への出し方だけを持つ
+      let pending = '';
       let first = true;
       let last: Message | undefined;
       const sentMessageIds: Snowflake[] = [];
-
       let toolLogMsg: Message | undefined;
 
-      for await (const gen of res) {
-        if (++c % 7 === 0)
-          m.channel.sendTyping();
-        switch (gen.type) {
-          case 'reasoning-start':
-            log('start reasoning...');
-            break;
+      const flushText = async (): Promise<void> => {
+        if (isEffectivelyEmpty(pending)) return;
+        const msgs = await sendMessage(pending, m, first);
+        sentMessageIds.push(...msgs.map(msg => msg.id));
+        pending = '';
+        first = false;
+      };
 
-          case 'reasoning-delta':
-            log('reasoning:', gen.text);
-            break;
+      const result = await runAgent(
+        chat,
+        [
+          { type: 'text', text: input },
+          ...(files.map(f => ({ type: 'file', file: f } as const))),
+        ],
+        { msg: m },
+        {
+          tickEvery: 7,
+          onTick: () => { m.channel.sendTyping(); },
+          onEvent: async (gen) => {
+            switch (gen.type) {
+              case 'reasoning-start':
+                log('start reasoning...');
+                break;
 
-          case 'text-delta':
-            log('gen:', gen.text);
-            text += gen.text;
-            break;
+              case 'reasoning-delta':
+                log('reasoning:', gen.text);
+                break;
 
-          case 'image-thumbnail':
-          case 'image':
-            log('image:', gen.url);
-            m.channel.sendTyping();
+              case 'text-delta':
+                log('gen:', gen.text);
+                pending += gen.text;
+                break;
 
-            if (!isEffectivelyEmpty(text)) {
-              const msgs = await sendMessage(text, m, first);
-              sentMessageIds.push(...msgs.map(msg => msg.id));
-              text = '';
-              first = false;
+              case 'image-thumbnail':
+              case 'image':
+                log('image:', gen.url);
+                m.channel.sendTyping();
+
+                await flushText();
+
+                if (last) await last.edit({ content: gen.url });
+                else {
+                  const msgs = await sendMessage(gen.url, m, first);
+                  last = msgs[0];
+                  sentMessageIds.push(...msgs.map(msg => msg.id));
+                }
+
+                if (gen.type === 'image') last = void 0;
+                break;
+
+              case 'tool-call':
+                log('function call:');
+                m.channel.sendTyping();
+                break;
+
+              case 'tool-call-detail': {
+                log('fc:', gen);
+                const toolText = `-# ${gen.data.description !== '' ? `${gen.data.description} ` : ''}(\`${gen.data.name}\`)...`
+                if (!toolLogMsg)
+                  toolLogMsg = await m.channel.send(toolText);
+                else
+                  toolLogMsg.edit(toolText);
+                break;
+              }
+
+              case 'tool-result':
+                log('tool result:', gen.data);
+                m.channel.sendTyping();
+                break;
+
+              case 'error':
+                pending += `ERROR:\n\`\`\`json\n${JSON.stringify(gen, null, 2)}\n\`\`\`\n`;
+                chatStore.delete(contextKey);
+                break;
+
+              case 'usage':
+                log('usage:', gen.usage);
+                break;
+
+              default:
+                log(m.id, 'gen :', gen);
+                break;
             }
+          },
+        },
+      );
 
-            if (last) await last.edit({ content: gen.url });
-            else {
-              const msgs = await sendMessage(gen.url, m, first);
-              last = msgs[0];
-              sentMessageIds.push(...msgs.map(msg => msg.id));
-            }
-
-            if (gen.type === 'image') last = void 0;
-
-            /* なぜかembedの画像が一瞬で消える
-            await m.channel.send({ embeds: [
-              { image: { url: gen.url } },
-            ] });
-            */
-            break;
-
-          case 'tool-call':
-            log('function call:');
-            m.channel.sendTyping();
-            break;
-
-          case 'tool-call-detail':
-            log('fc:', gen);
-            toolCount.set(gen.data.name, (toolCount.get(gen.data.name) ?? 0) + 1);
-            const toolText = `-# ${gen.data.description !== '' ? `${gen.data.description} ` : ''}(\`${gen.data.name}\`)...`
-            if (!toolLogMsg)
-              toolLogMsg = await m.channel.send(toolText);
-            else
-              toolLogMsg.edit(toolText);
-            break;
-
-          case 'tool-result':
-            log('tool result:', gen.data);
-            m.channel.sendTyping();
-            break;
-
-          case 'error':
-            text += `ERROR:\n\`\`\`json\n${JSON.stringify(gen, null, 2)}\n\`\`\`\n`;
-            chatStore.delete(contextKey);
-            break;
-
-          case 'usage':
-            log('usage:', gen.usage);
-            usage = gen.usage;
-            break;
-
-          default:
-            log(m.id, 'gen :', gen);
-            break;
-        }
-      }
-
-      text = text.trim();
-      text += `\n-# model: ${chat.label}${toolCount.size > 0 ? ` (${Array.from(toolCount, ([k, v]) => `\`${k}\`: ${v}`).join(', ')})` : ""}${usage !== undefined ? ` (tokens: ${formatTokenUsage(usage)})` : ''}`;
+      let text = pending.trim();
+      const usage = result.usage;
+      text += `\n-# model: ${chat.label}${result.tools.size > 0 ? ` (${Array.from(result.tools, ([k, v]) => `\`${k}\`: ${v}`).join(', ')})` : ""}${usage !== undefined ? ` (tokens: ${formatUsage(usage)})` : ''}`;
       const finalMsgs = await sendMessage(text, m, first);
       sentMessageIds.push(...finalMsgs.map(msg => msg.id));
       if (toolLogMsg) toolLogMsg.delete();

@@ -70,6 +70,8 @@ export interface Config {
   admin?: {
     port?: number;
     token?: string;
+    /** バックグラウンドジョブを同時に走らせる本数 (既定 1。増やすと記憶の書き込みが競合しうる) */
+    jobConcurrency?: number;
   };
 }
 

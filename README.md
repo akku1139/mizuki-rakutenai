@@ -36,6 +36,7 @@ pnpm start   # node --env-file=.env index.ts
 - [docs/commands.md](docs/commands.md): コマンド一覧
 - [docs/ai.md](docs/ai.md): AI アシスタントの仕組み (プロバイダ、文脈、ツール、429 対策)
 - [docs/fluxsync.md](docs/fluxsync.md): Discord ⇔ Fluxer チャンネル同期
+- [docs/admin.md](docs/admin.md): 管理パネルとバックグラウンドジョブ
 - [docs/features.md](docs/features.md): サーバーログ、安価、コイン監視、MiQ
 - [docs/scripts.md](docs/scripts.md): 単発実行のスクリプト (`emojisync.ts`、`purge.js`)
 - [docs/development.md](docs/development.md): ディレクトリ構成、ハードコードされた ID、テスト

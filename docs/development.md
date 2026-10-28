@@ -10,6 +10,8 @@ src/
   clients.ts        Discord と Fluxer のクライアント、ボットのユーザー ID
   utils.ts          文字列の分割などの共通処理
   ai/               AI アシスタント (docs/ai.md)
+  memory/           記憶 (docs/ai.md)
+  jobs/             バックグラウンドジョブ (docs/admin.md)
   fluxsync/         チャンネル同期 (docs/fluxsync.md)
   logging/          サーバーログ (docs/features.md)
   anka.ts           安価 (docs/features.md)
@@ -66,6 +68,7 @@ pnpm typecheck   # tsc --noEmit
 | `tests/openai-compact.test.ts` | トークン数による auto-compact (要約・失敗時の破棄・切れ目・カタログ参照) |
 | `tests/model-meta.test.ts` | モデルカタログ (models.dev とプロバイダの /models) の解決 |
 | `tests/memory.test.ts` | 記憶の保存・重複排除・上限・想起の優先順と文字数・`memory` ツール |
+| `tests/jobs.test.ts` | バックグラウンドジョブ (Discord に送らない実行・中断・記録) |
 
 GitHub Actions (`.github/workflows/ci.yml`) で、main への push と PR のたびに両方を実行します。
 

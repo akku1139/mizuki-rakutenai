@@ -47,7 +47,23 @@ th{color:var(--accent)}
 <dt>headers (JSON)</dt><dd><textarea id="m_headers" rows="3" style="width:100%"></textarea></dd>
 </div><button id="m_submit" onclick="addMcp()">追加</button> <button onclick="resetMcpForm()">クリア</button></div></section>
 <section id="channels" hidden><div class="card"><h3>チャンネル一覧</h3><table id="channelsTable"><tr><th>プラットフォーム</th><th>チャンネル</th><th>ブラックリスト</th></tr></table></div></section>
-<section id="jobs" hidden><div class="card"><h3>バックグラウンドジョブ</h3><div class="kv"><dt>type</dt><dd><input id="job_type" value="index"></dd><dt>channelId</dt><dd><input id="job_channel"></dd><dt>prompt (agent)</dt><dd><textarea id="job_prompt" rows="2" style="width:100%"></textarea></dd></div><button onclick="enqueueJob()">発行</button><table id="jobsTable"><tr><th>ID</th><th>type</th><th>channel</th><th>status</th><th>result</th></tr></table></div></section>
+<section id="jobs" hidden>
+<div class="card">
+<h3>バックグラウンドジョブ <small id="jobsSummary" style="color:var(--muted)"></small></h3>
+<div class="kv">
+<dt>type</dt><dd><select id="job_type"><option value="agent">agent (指示文を実行)</option><option value="index">index (チャンネルを読んで記憶に保存)</option></select></dd>
+<dt>provider</dt><dd><select id="job_provider"><option value="">既定</option><option value="openai">openai</option><option value="rakutenai">rakutenai</option></select></dd>
+<dt>channelId</dt><dd><input id="job_channel" placeholder="index は必須 / agent は任意 (ログを添える)"></dd>
+<dt>limit</dt><dd><input id="job_limit" type="number" value="100" min="1" max="200"></dd>
+<dt>prompt (agent)</dt><dd><textarea id="job_prompt" rows="3" style="width:100%" placeholder="エージェントへの指示 (Discord には送信されません)"></textarea></dd>
+</div>
+<button onclick="enqueueJob()">発行</button>
+<button onclick="clearJobs()">終了したジョブを消す</button>
+<p style="color:var(--muted);font-size:12px">出力は Discord に送られません。結果・ツール呼び出し・エラーは下の一覧に残ります。</p>
+<table id="jobsTable"><tr><th>ID</th><th>type</th><th>status</th><th>時間</th><th>結果 / エラー</th><th>操作</th></tr></table>
+</div>
+<div class="card"><h3>選択中のジョブ</h3><pre id="jobDetail" style="white-space:pre-wrap;font-size:12px;margin:0">（行をクリックすると詳細）</pre></div>
+</section>
 </main>
 <script>
 const tabs=document.querySelectorAll('nav button');
@@ -73,7 +89,20 @@ async function refresh(){
   const pr=await api('/api/ai-prefs');const prt=document.getElementById('prefs');prt.innerHTML='<tr><th>ユーザー ID</th><th>プロバイダ</th></tr>';Object.entries(pr).forEach(([k,v])=>row(prt,[k,v]));
   const lg=await api('/api/logs');const lb=document.getElementById('logbox');lb.innerHTML='';lg.forEach(e=>{const d=document.createElement('div');d.className=e.level;d.textContent=`[${new Date(e.ts).toLocaleTimeString()}] ${e.message}`;lb.appendChild(d);});
   const chs=await api('/api/channels');const cht=document.getElementById('channelsTable');cht.innerHTML='<tr><th>プラットフォーム</th><th>チャンネル</th><th>ブラックリスト</th></tr>';chs.forEach(x=>{const tr=document.createElement('tr');const td1=document.createElement('td');td1.textContent=x.platform;tr.appendChild(td1);const td2=document.createElement('td');td2.textContent=x.name;tr.appendChild(td2);const td3=document.createElement('td');const cb=document.createElement('input');cb.type='checkbox';cb.checked=x.blacklisted;cb.onchange=async()=>{await fetch('/api/blacklist',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify({channelId:x.id,blacklisted:cb.checked})});};td3.appendChild(cb);tr.appendChild(td3);cht.appendChild(tr);});
-  const jobs=await api('/api/jobs');const jt=document.getElementById('jobsTable');jt.innerHTML='<tr><th>ID</th><th>type</th><th>channel</th><th>status</th><th>result</th></tr>';jobs.forEach(x=>{const tr=document.createElement('tr');[x.id,x.type,x.channelId,x.status,x.result||x.error||''].forEach(c=>{const td=document.createElement('td');td.textContent=c;tr.appendChild(td);});jt.appendChild(tr);});
+  const jobState=await api('/api/jobs');
+  document.getElementById('jobsSummary').textContent=`(実行中 ${jobState.running} / 待ち ${jobState.queued} / 同時 ${jobState.concurrency})`;
+  const jt=document.getElementById('jobsTable');jt.innerHTML='<tr><th>ID</th><th>type</th><th>status</th><th>時間</th><th>結果 / エラー</th><th>操作</th></tr>';
+  jobState.jobs.forEach(x=>{
+    const tr=document.createElement('tr');
+    const secs=x.startedAt?((x.finishedAt??Date.now())-x.startedAt)/1000:0;
+    [x.id,x.type+(x.provider?` (${x.provider})`:''),x.status,(secs?secs.toFixed(1)+'s':'-'),(x.result||x.error||'').slice(0,120)].forEach(c=>{const td=document.createElement('td');td.textContent=c;tr.appendChild(td);});
+    const td=document.createElement('td');
+    if(x.status==='running'||x.status==='queued'){const b=document.createElement('button');b.textContent='中断';b.onclick=async()=>{await fetch('/api/jobs/cancel',{method:'POST',headers:authHeaders(),body:JSON.stringify({id:x.id})});refresh();};td.appendChild(b);}
+    const d=document.createElement('button');d.textContent='詳細';d.onclick=()=>showJob(x.id);td.appendChild(d);
+    tr.appendChild(td);
+    tr.onclick=(e)=>{if(e.target.tagName!=='BUTTON')showJob(x.id);};
+    jt.appendChild(tr);
+  });
   const mc=await api('/api/mcp');const mct=document.getElementById('mcps');mct.innerHTML='<tr><th>名前</th><th>状態</th><th>ツール数</th><th>操作</th></tr>';mc.forEach(x=>{const tr=document.createElement('tr');[x.name,x.status,x.toolCount].forEach(c=>{const td=document.createElement('td');td.textContent=c;tr.appendChild(td);});const td=document.createElement('td');
 const cb=document.createElement('button');cb.textContent='接続';cb.onclick=()=>connectMcp(x.name);td.appendChild(cb);
 if(x.oauthRequired){const ob=document.createElement('button');ob.textContent='認証';ob.onclick=async()=>{const r=await fetch('/api/mcp/oauth',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify({name:x.name})});const j=await r.json();if(j.url)window.open(j.url,'_blank');};td.appendChild(ob);}
@@ -85,7 +114,10 @@ tr.appendChild(td);mct.appendChild(tr);});
 async function addMcp(){let headers;try{const v=document.getElementById('m_headers').value.trim();if(v)headers=JSON.parse(v);}catch(e){alert('headers JSON invalid');return;}const cfg={name:document.getElementById('m_name').value,url:document.getElementById('m_url').value||undefined,command:document.getElementById('m_cmd').value||undefined,transport:document.getElementById('m_tr').value,headers};await fetch('/api/mcp',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify(cfg)});resetMcpForm();refresh();}
 function resetMcpForm(){document.getElementById('m_name').value='';document.getElementById('m_name').readOnly=false;document.getElementById('m_url').value='';document.getElementById('m_cmd').value='';document.getElementById('m_tr').value='http';document.getElementById('m_headers').value='';document.getElementById('m_submit').textContent='追加';}
 async function connectMcp(name){await fetch('/api/mcp/connect',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify({name})});refresh();}
-async function enqueueJob(){await fetch('/api/jobs',{method:'POST',headers:{'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'},body:JSON.stringify({type:document.getElementById('job_type').value,channelId:document.getElementById('job_channel').value,prompt:document.getElementById('job_prompt').value})});refresh();}
+function authHeaders(){return {'Authorization':'Bearer '+(localStorage.token||''),'Content-Type':'application/json'};}
+async function enqueueJob(){await fetch('/api/jobs',{method:'POST',headers:authHeaders(),body:JSON.stringify({type:document.getElementById('job_type').value,provider:document.getElementById('job_provider').value||undefined,channelId:document.getElementById('job_channel').value||undefined,limit:Number(document.getElementById('job_limit').value)||undefined,prompt:document.getElementById('job_prompt').value||undefined})});refresh();}
+async function clearJobs(){await fetch('/api/jobs/clear',{method:'POST',headers:authHeaders()});refresh();}
+async function showJob(id){const j=await api('/api/jobs?id='+encodeURIComponent(id));const lines=[`id: ${j.id}`,`type: ${j.type} / status: ${j.status}`,`provider: ${j.provider||'(既定)'}`,`channel: ${j.channelId||'-'}`,`開始: ${j.startedAt?new Date(j.startedAt).toLocaleString():'-'}`,j.finishedAt?`終了: ${new Date(j.finishedAt).toLocaleString()}`:'',j.usage?`usage: ${j.usage.inputTokens} in / ${j.usage.outputTokens} out${j.usage.cachedInputTokens!==undefined?` (${j.usage.cachedInputTokens} cached)`:''}`:'',j.tools?`tools: ${Object.entries(j.tools).map(([k,v])=>k+': '+v).join(', ')}`:'',j.error?`error: ${j.error}`:'',`prompt: ${j.prompt||'-'}`,'','--- イベント ---',...j.events.map(e=>`[${new Date(e.at).toLocaleTimeString()}] ${e.kind}: ${e.text}`),'',...(j.result?['--- 結果 ---',j.result]:[])];document.getElementById('jobDetail').textContent=lines.filter(Boolean).join('\n');}
 refresh();setInterval(refresh,5000);
 </script>
 </body>
