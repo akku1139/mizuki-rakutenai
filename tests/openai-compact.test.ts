@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { OpenAICompatChat } from '../src/ai/openai.ts';
+import { resetModelMetaCache } from '../src/ai/model-meta.ts';
 import type { AIEvent, ToolSpec } from '../src/ai/types.ts';
 
 type Message = { role: string, content?: unknown, tool_calls?: Array<{ id: string }>, tool_call_id?: string };
@@ -153,4 +154,63 @@ test('compact は tool 呼び出しとその結果の対応を割らない', asy
       }
     }
   }
+});
+
+test('コンテキストウィンドウはモデルカタログから引く (1M のモデルを 96k で compact しない)', async t => {
+  resetModelMetaCache();
+  const bodies: Body[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string, init?: RequestInit) => {
+    if (String(url) === 'https://models.dev/api.json') {
+      return new Response(JSON.stringify({ openrouter: { id: 'openrouter', api: 'https://openrouter.ai/api/v1', models: {} } }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (String(url).endsWith('/models')) {
+      // プロバイダは 1M と答えている (models.dev には無いモデル)
+      return new Response(JSON.stringify({ data: [{ id: 'test-model', context_length: 1_000_000 }] }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    const body = JSON.parse(String(init!.body)) as Body;
+    bodies.push(body);
+    if (body.stream === false) return completion('- 要約');
+    // 200k トークン相当 (日本語 400 文字 x 60 往復) まで積む
+    return body.messages.length >= 120
+      ? stream('done')
+      : new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `c${body.messages.length}`, function: { name: 's', arguments: '{}' } }] } }] })}\n\ndata: [DONE]\n\n`);
+  });
+
+  const chat = new OpenAICompatChat({ baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'k', model: 'test-model' }, {
+    definitions: [{ type: 'function', function: { name: 's' } }],
+    execute: async () => [true, { rows: 'あ'.repeat(1000) }],   // 1 往復 ≒ 1,200 トークン
+  });
+  for await (const _event of chat.sendMessage({ contents: [{ type: 'text', text: 'q' }] })) { /* drain */ }
+
+  const compactions = bodies.filter(b => b.stream === false);
+  const largest = Math.max(...bodies.filter(b => b.stream !== false).map(b => JSON.stringify(b.messages).length));
+  assert.equal(compactions.length, 0, `約 ${Math.round(largest / 2.5)} トークンで compact している (1M のモデルなので不要)`);
+});
+
+test('カタログに無ければ既定の 128k で compact する', async t => {
+  resetModelMetaCache();
+  const bodies: Body[] = [];
+  let rounds = 0;
+  t.mock.method(globalThis, 'fetch', async (url: string, init?: RequestInit) => {
+    if (String(url) === 'https://models.dev/api.json') return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    if (String(url).endsWith('/models')) return new Response('nope', { status: 404 });
+    const body = JSON.parse(String(init!.body)) as Body;
+    bodies.push(body);
+    if (body.stream === false) return completion('- 要約');
+    if (body.messages.at(-1)!.role === 'tool') rounds++;
+    if (rounds >= 20) return stream('done');
+    return new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `c${rounds}`, function: { name: 's', arguments: '{}' } }] } }] })}\n\ndata: [DONE]\n\n`);
+  });
+
+  const chat = new OpenAICompatChat({ baseUrl: 'https://llm.invalid/v1', apiKey: 'k', model: 'unknown-model' }, {
+    definitions: [{ type: 'function', function: { name: 's' } }],
+    execute: async () => [true, { rows: 'あ'.repeat(20_000) }],   // 1 往復 ≒ 24,000 トークン
+  });
+  for await (const _event of chat.sendMessage({ contents: [{ type: 'text', text: 'q' }] })) { /* drain */ }
+
+  assert.ok(bodies.some(b => b.stream === false), '既定の窓で compact していない');
 });

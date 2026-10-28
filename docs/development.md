@@ -63,7 +63,8 @@ pnpm typecheck   # tsc --noEmit
 | `tests/ratelimit.test.ts` | 429 の再試行、添付ファイル処理、ツール呼び出し ID の対応 |
 | `tests/openai-history.test.ts` | 失敗・空応答時の巻き戻し |
 | `tests/openai-tool-history.test.ts` | ツール呼び出しを含む履歴が次のリクエストで通用するか |
-| `tests/openai-compact.test.ts` | トークン数による auto-compact (要約・失敗時の破棄・切れ目) |
+| `tests/openai-compact.test.ts` | トークン数による auto-compact (要約・失敗時の破棄・切れ目・カタログ参照) |
+| `tests/model-meta.test.ts` | モデルカタログ (models.dev とプロバイダの /models) の解決 |
 
 GitHub Actions (`.github/workflows/ci.yml`) で、main への push と PR のたびに両方を実行します。
 

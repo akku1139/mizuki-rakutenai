@@ -146,20 +146,25 @@ OpenAI 公式のスキーマには無いフィールドなので、互換サー�
 - ツールを大量に呼ぶターンは 1 回で窓を食い潰すので、判断はターンの開始時ではなく
   **リクエストのたび**に行います。
 
-コンテキストウィンドウの既定は 128,000 トークンです。実際の値と違うときは設定で直します。
+コンテキストウィンドウは次の順で決めます (`src/ai/model-meta.ts`、teapot の移植)。
+
+1. 設定 `ai.contextWindowTokens` / `ai.openaiProfiles.<名前>.contextWindowTokens`
+2. **モデルカタログ** — プロバイダの `GET /models` の `context_length`、無ければ
+   [models.dev](https://models.dev) の `limit.context`
+3. どちらも分からなければ 128,000 トークン
+
+カタログは `baseUrl` のホストで引きます (models.dev の 233 プロバイダを API ホストで照合し、
+同じホストを複数のカタログに分けているプロバイダはパスで選び分けます)。一覧はプロバイダが正で、
+models.dev は穴埋めです (`reflection/beam:free` のように models.dev に載っていないモデルがあり、
+逆にプロバイダが能力を公開しないこともあるため)。取得は 1 時間 (失敗は 5 分) キャッシュし、
+セッションをまたいで使い回します。決まった値は起動後の最初のリクエストでログに出ます。
 
 ```json
-{
-  "ai": {
-    "contextWindowTokens": 128000,
-    "openaiProfiles": { "openai": { "model": "…", "contextWindowTokens": 200000 } }
-  }
-}
+{ "ai": { "contextWindowTokens": 1000000 } }
 ```
 
-モデルごとの値はプロファイル (`ai.openaiProfiles.<名前>.contextWindowTokens`) が優先です。
-実際のウィンドウより**大きく**設定すると、compact が走る前に API が 400 を返して
-そのセッションは捨てられます (小さい分には早めに要約されるだけで害はありません)。
+設定を書くとカタログより優先されます。**設定を間違えて実際より大きくすると、compact が走る前に
+API が 400 を返してそのセッションは捨てられます** (小さい分には早めに要約されるだけで害はありません)。
 
 ## ツール (openai のみ)
 

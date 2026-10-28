@@ -11,6 +11,7 @@ import {
   COMPACT_INSTRUCTION, COMPACT_UPDATE_INSTRUCTION, contextTokens, droppedMessage, estimateTokens,
   safeCutPoint, stripAnalysis, summaryMessage, type History,
 } from './compact.ts';
+import { contextLengthFor, fetchModelListCached } from './model-meta.ts';
 import { fetchWithRateLimitRetry } from './ratelimit.ts';
 
 export interface OpenAICompatConfig {
@@ -19,7 +20,10 @@ export interface OpenAICompatConfig {
   apiKey: string,
   /** 例: gpt-4o-mini */
   model: string,
-  /** コンテキストウィンドウ (トークン)。auto-compact の予算はこの 75%。未指定なら 128k */
+  /**
+   * コンテキストウィンドウ (トークン)。auto-compact の予算はこの 75%。
+   * 未指定ならモデルカタログ (`model-meta.ts`) から引き、それも無ければ 128k を仮定する
+   */
   contextWindowTokens?: number,
 }
 
@@ -100,6 +104,10 @@ export class OpenAICompatChat implements ChatSession {
   #compactFailures = 0;
   /** 最後に compact したあとの履歴の長さ (無進捗での再 compact を避ける) */
   #compactedAtLen = 0;
+  /** モデルカタログから引いたコンテキストウィンドウ (解決は 1 回だけ) */
+  #catalogWindowTokens: Promise<number | undefined> | undefined;
+  /** 直近に使ったウィンドウの出どころ (変わったときだけログに出す) */
+  #windowSource: 'config' | 'catalog' | 'default' | undefined;
 
   constructor(config: OpenAICompatConfig, tools?: ToolSpec) {
     this.#config = config;
@@ -126,6 +134,8 @@ export class OpenAICompatChat implements ChatSession {
     try { host = new URL(config.baseUrl).hostname; } catch { host = ''; }
     this.#reasoningKey = /(^|\.)openrouter\.ai$/i.test(host) ? 'reasoning' : 'reasoning_content';
     this.label = config.model;
+    // 最初のリクエストでカタログ待ちにならないよう、先に引き始めておく
+    if (config.contextWindowTokens === undefined) void this.#contextWindow();
   }
 
   setSystemPrompt(text: string): void {
@@ -214,11 +224,32 @@ export class OpenAICompatChat implements ChatSession {
     }
   }
 
-  /** auto-compact の予算 (トークン)。contextWindowTokens の 75% */
-  #contextBudget(): number {
-    const window = this.#config.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
-    if (!Number.isFinite(window) || window <= 0) return 0;
-    return Math.round(window * COMPACT_AT_SHARE);
+  /**
+   * コンテキストウィンドウを決める。設定 > モデルカタログ > 既定 (128k)。
+   * カタログは 1 セッションにつき 1 回だけ引く (DB 自体は model-meta 側でキャッシュされる)。
+   */
+  async #contextWindow(): Promise<{ tokens: number, source: 'config' | 'catalog' | 'default' }> {
+    const configured = this.#config.contextWindowTokens;
+    if (configured !== undefined && Number.isFinite(configured) && configured > 0) {
+      return { tokens: configured, source: 'config' };
+    }
+    this.#catalogWindowTokens ??= fetchModelListCached(this.#config.baseUrl, this.#config.apiKey)
+      .then(list => contextLengthFor(list, this.#config.model))
+      .catch(() => undefined);
+    const tokens = await this.#catalogWindowTokens;
+    if (tokens !== undefined && Number.isFinite(tokens) && tokens > 0) return { tokens, source: 'catalog' };
+    return { tokens: DEFAULT_CONTEXT_WINDOW_TOKENS, source: 'default' };
+  }
+
+  /** auto-compact の予算 (トークン)。コンテキストウィンドウの 75% */
+  async #contextBudget(): Promise<number> {
+    const { tokens, source } = await this.#contextWindow();
+    if (this.#windowSource !== source) {
+      this.#windowSource = source;
+      log(`compact: コンテキストウィンドウ ${tokens.toLocaleString()} トークン (${source}) → 予算 ${Math.round(tokens * COMPACT_AT_SHARE).toLocaleString()}`);
+    }
+    if (!Number.isFinite(tokens) || tokens <= 0) return 0;
+    return Math.round(tokens * COMPACT_AT_SHARE);
   }
 
   /**
@@ -227,7 +258,7 @@ export class OpenAICompatChat implements ChatSession {
    * 連続で失敗したら、そのセッションでは自動 compact を諦める。
    */
   async #maybeCompact(): Promise<void> {
-    const budget = this.#contextBudget();
+    const budget = await this.#contextBudget();
     if (budget <= 0) return;
     if (this.#compactFailures >= MAX_COMPACT_FAILURES) return;
     if (this.#history.length <= this.#compactedAtLen) return;

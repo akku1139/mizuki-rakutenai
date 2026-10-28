@@ -79,7 +79,9 @@ test('429 during tool follow-up retries the same request without executing the t
   const bodies: string[] = [];
   let executions = 0;
   const sse = (delta: object) => new Response(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`);
-  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
+  t.mock.method(globalThis, 'fetch', async (url: unknown, init: RequestInit) => {
+    // モデルカタログ (models.dev / プロバイダの /models) は数えない
+    if (!String(url).endsWith('/chat/completions')) return new Response('nope', { status: 404 });
     bodies.push(String(init.body));
     if (bodies.length === 1) return sse({ tool_calls: [{ index: 0, id: 'call_1', function: { name: 'lookup', arguments: '{}' } }] });
     if (bodies.length === 2) return new Response('busy', { status: 429, headers: { 'Retry-After': '0' } });
