@@ -522,12 +522,33 @@ const resolveChannelArg = async (
 
   const pools: any[] = [...guild.channels.cache.values(), ...((guild as any).threads?.cache?.values?.() ?? [])]
     .filter((c: any) => typeof c?.isTextBased === 'function' && c.isTextBased());
-  const byName = (test: (name: string) => boolean) => pools.find((c: any) => test(String(c.name ?? '').toLowerCase()));
+  // bot が読めるチャンネルを優先する (名前は合っているのに権限が無い、を避ける)
+  const readable = (c: any): boolean => {
+    try {
+      const me = msg.client.user;
+      const perms = c?.permissionsFor?.(me);
+      return perms == null ? true : perms.has('ViewChannel');
+    } catch {
+      return true;
+    }
+  };
+  const ordered = [...pools.filter(readable), ...pools.filter(c => !readable(c))];
+  const byName = (test: (name: string) => boolean) => ordered.find((c: any) => test(String(c.name ?? '').toLowerCase()));
   const channel = byName(n => n === wanted)
     ?? byName(n => n.replace(/[-_ ]/g, '') === wanted.replace(/[-_ ]/g, ''))
     ?? byName(n => n.startsWith(wanted))
     ?? byName(n => n.includes(wanted));
-  if (channel !== undefined) return { channel: channel as HistoryChannel };
+  if (channel !== undefined) {
+    if (!readable(channel)) {
+      return {
+        error: {
+          error: `チャンネル「${raw}」を読む権限がありません`,
+          candidates: [`#${(channel as { name?: string }).name ?? ''}`],
+        },
+      };
+    }
+    return { channel: channel as HistoryChannel };
+  }
 
   const candidates = channeNameCandidates(guild, wanted);
   return {
@@ -600,8 +621,19 @@ const fetchMessagesHistory: AITool = {
           }
         }
       } else {
-        const latest = await ch.messages.fetch({ limit: 1 });
-        anchorId = [...latest.values()][0]?.id;
+        try {
+          const latest = await ch.messages.fetch({ limit: 1 });
+          anchorId = [...latest.values()][0]?.id;
+        } catch (e) {
+          const code = (e as { code?: number }).code;
+          return [false, {
+            error: `#${(ch as unknown as { name?: string }).name ?? ch.id}: `
+              + (code === 50001 || code === 50013
+                ? 'このチャンネルを読む権限がありません (Missing Access)'
+                : `メッセージを取得できませんでした (${code ?? (e instanceof Error ? e.message : String(e))})`),
+            hint: '別のチャンネルを指定するか、メッセージの URL を anchor に渡してください。',
+          }];
+        }
         if (!anchorId && msg.id) anchorId = msg.id;
       }
 
@@ -614,7 +646,19 @@ const fetchMessagesHistory: AITool = {
       const fetchOpts: Record<string, unknown> = { cache: false, limit: lim };
       if (anchorId) fetchOpts[dir === 'after' ? 'after' : dir === 'before' ? 'before' : 'around'] = anchorId;
 
-      const messages = await ch.messages.fetch(fetchOpts as Parameters<typeof ch.messages.fetch>[0]);
+      let messages: Map<string, any>;
+      try {
+        messages = await ch.messages.fetch(fetchOpts as Parameters<typeof ch.messages.fetch>[0]);
+      } catch (e) {
+        const code = (e as { code?: number }).code;
+        const reason = code === 50001 || code === 50013
+          ? 'このチャンネルを読む権限がありません (Missing Access)'
+          : `メッセージを取得できませんでした (${code ?? (e instanceof Error ? e.message : String(e))})`;
+        return [false, {
+          error: `#${(ch as unknown as { name?: string }).name ?? ch.id}: ${reason}`,
+          hint: '別のチャンネルを指定するか、メッセージの URL を anchor に渡してください。',
+        }];
+      }
       const items = await Promise.all([...messages.values()].map(async m => ({
         id: m.id,
         ...(await messageToAISchema(m)),

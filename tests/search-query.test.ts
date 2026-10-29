@@ -278,3 +278,30 @@ test('fetch_messages_history はチャンネル名でも引ける (曖昧一致�
   assert.match(error.error, /#taken-general/);
   assert.deepEqual(error.candidates, ['#taken-general']);
 });
+
+test('読めないチャンネルは権限のエラーで返す (50001 をそのまま出さない)', async () => {
+  const denied = {
+    id: '7', name: 'taken-gen', isTextBased: () => true,
+    permissionsFor: () => ({ has: () => false }),
+    messages: { fetch: async () => { throw Object.assign(new Error('Missing Access'), { code: 50001 }); } },
+  };
+  const metaWith = (channel: object) => ({
+    msg: {
+      id: '1', channelId: '2', guild: { id: '1', channels: { cache: new Map([['7', channel]]) }, threads: { cache: new Map() } },
+      channel: { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } },
+      client: { channels: { fetch: async () => channel } },
+    },
+  }) as unknown as Parameters<typeof executeAITool>[2];
+
+  const result = await executeAITool('fetch_messages_history', { channel: 'taken-gen', limit: 3 }, metaWith(denied));
+  assert.equal(result[0], false);
+  assert.match(String((result[1] as { error: string }).error), /権限がありません/);
+
+  // 権限判定が無い実装でも、取得時の 50001 を分かりやすい文にする
+  const readableButBroken = { ...denied, permissionsFor: () => ({ has: () => true }) };
+  const second = await executeAITool('fetch_messages_history', { channel: 'taken-gen', limit: 3 }, metaWith(readableButBroken));
+  assert.equal(second[0], false);
+  const error = second[1] as { error: string, hint: string };
+  assert.match(error.error, /権限がありません/);
+  assert.match(error.hint, /URL/);
+});
