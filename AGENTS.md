@@ -101,6 +101,9 @@ docs/             機能ごとの仕様 (ai.md が AI の一次資料)
 - **コンテキストウィンドウはモデルカタログから引く** (`src/ai/model-meta.ts`、teapot の移植)。
   設定 > プロバイダの `/models` の `context_length` > models.dev の `limit.context` > 128k の順。
   カタログはホストで引き、値はプロバイダ優先・models.dev は穴埋め (両方欠けることがある)。
+- **システムプロンプトは `src/ai/prompt.ts`**。セッション生成時に 1 回だけ組み立てる
+  (ターンごとに変えると prefix cache が壊れる)。記憶の抜粋はユーザーメッセージ側に置く。
+  Notion MCP には公開系のツールが無いので「公開する」指示は書かない (`public_url` は読み取り専用)。
 - **記憶は `src/memory/`**。ChatGPT 方式 (保存した事実を毎ターン注入。検索しない) で、
   サーバーごとに `data/memory/<guildId>.json`。書き込みは `memory` ツールに一本化し、
   Notion を直接叩かせない (重複する)。**ローカルに DB は作らない**方針 (sakana 式の木を
