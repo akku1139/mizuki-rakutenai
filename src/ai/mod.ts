@@ -59,7 +59,7 @@ class RakutenAIChat implements ChatSession {
 /** The message and the messages forwarded in it, whose attachments and embeds live in the snapshots. */
 const withSnapshots = (m: Message<boolean>) => [m, ...m.messageSnapshots.values()];
 
-/** 
+/**
  * The replied-to message and the posts by the same author around it,
  * which often carry the images or links the question is about.
  * Replies to our own messages are skipped; the conversation already has them.
@@ -147,6 +147,26 @@ const chatStore = new Map<string, ChatEntry>();
 let aiWaitingJobs = 0;
 let aiProcessingJobs = 0;
 
+const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message[]> => {
+  const parts = splitLongString(text
+    .replace(/^####+ /gm, '### ')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, "[$1](<$2>)")
+  , 1500);
+
+  const sentMessages: Message[] = [];
+
+  for(const part of parts) {
+    if(first) {
+      sentMessages.push(await m.reply(part));
+      first = false;
+    } else {
+      sentMessages.push(await m.channel.send(part));
+    }
+  }
+
+  return sentMessages;
+};
+
 const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
   if (
     !m.author.bot
@@ -223,27 +243,6 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         m.channel.sendTyping();
       };
 
-      const sendMessage = async (text: string, first: boolean): Promise<Message[]> => {
-        const parts = splitLongString(text
-          .replace(/^####+ /gm, '### ')
-          .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, "[$1](<$2>)")
-        , 1500);
-
-        const sentMessages: Message[] = [];
-
-        for(const part of parts) {
-          if(first) {
-            sentMessages.push(await m.reply(part));
-            first = false;
-          } else {
-            sentMessages.push(await m.channel.send(part));
-          }
-          lastMessageSentAt = Date.now();
-        }
-
-        return sentMessages;
-      };
-
       sendTyping();
 
       // ★ 最後に自分が投稿したメッセージID（存在すれば after に指定）
@@ -314,10 +313,11 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       const flushText = async (): Promise<void> => {
         if (isEffectivelyEmpty(pending)) return;
-        const msgs = await sendMessage(pending, first);
+        const msgs = await sendMessage(pending, m, first);
         sentMessageIds.push(...msgs.map(msg => msg.id));
         pending = '';
         first = false;
+        lastMessageSentAt = Date.now();
       };
 
       const result = await runAgent(
@@ -354,9 +354,10 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
                 if (last) await last.edit({ content: gen.url });
                 else {
-                  const msgs = await sendMessage(gen.url, first);
+                  const msgs = await sendMessage(gen.url, m, first);
                   last = msgs[0];
                   sentMessageIds.push(...msgs.map(msg => msg.id));
+                  lastMessageSentAt = Date.now();
                 }
 
                 if (gen.type === 'image') last = void 0;
@@ -406,16 +407,17 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       let text = pending.trim();
       const usage = result.usage;
-      text += `\\n-# model: ${chat.label}${result.tools.size > 0 ? ` (${Array.from(result.tools, ([k, v]) => `\\`${k}\\`: ${v}`).join(', ')})` : \"\"}${usage !== undefined ? ` (tokens: ${formatUsage(usage)})` : ''}`;
+      text += `\\n-# model: ${chat.label}${result.tools.size > 0 ? ` (${Array.from(result.tools, ([k, v]) => `\\`${k}\\`: ${v}`).join(', ')})` : ""}${usage !== undefined ? ` (tokens: ${formatUsage(usage)})` : ''}`;
       if (toolLogMsg) toolLogMsg.delete();
-      const finalMsgs = await sendMessage(text, first);
+      const finalMsgs = await sendMessage(text, m, first);
       sentMessageIds.push(...finalMsgs.map(msg => msg.id));
+      lastMessageSentAt = Date.now();
 
       // 今回のメッセージIDを保存
       entry.lastIds = sentMessageIds;
 
     } catch (e) {
-      error(m.id, ': An error occurred during processing\n', e);
+      error(m.id, ': An error occurred during processing\\n', e);
       await m.reply(`ERROR:\\n\\`\\`\\`\\n${e}\\n\\`\\`\\``);
     } finally {
       --aiProcessingJobs;
