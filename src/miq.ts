@@ -20,6 +20,6 @@ fluxer.on('messageCreate', async m => {
     await m.reply(response);
   } catch (e) {
     error(m.id, ': miq failed\n', e);
-    await m.reply(`ERROR:\n\`\`\`\n${e}\n\`\`\``).catch(() => {});
+    await m.reply(`ERROR: 処理中にエラーが発生しました`).catch(() => {});
   }
 });
