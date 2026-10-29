@@ -134,14 +134,10 @@ const fetchMessage: AITool = {
 };
 
 /// search_messages: サーバー内のメッセージを検索する。
-/// Discord の検索 API は bot に開放されていないので、対象チャンネルを遡って取得し、
-/// `search-query.ts` が解釈した条件で自前で絞る。
+/// Discord の検索 API (`GET /guilds/{id}/messages/search`) を使う。API が解釈しない条件
+/// (`regex` / `len` / `-語` / `OR`) だけ、返ってきたメッセージに対して `search-query.ts` で評価する。
+/// 使えないときはエラーを返す (自前で遡るフォールバックは持たない)。
 
-/** 1 回の検索で見るメッセージ数の既定と上限 */
-const SEARCH_SCAN_DEFAULT = 1_000;
-const SEARCH_SCAN_MAX = 5_000;
-/** 1 リクエストで取る件数 (Discord の上限) */
-const SEARCH_PAGE = 100;
 /** 一度に遡るチャンネルの上限 (`all` のとき) */
 const SEARCH_MAX_CHANNELS = 12;
 
@@ -196,48 +192,6 @@ const resolveTargets = (values: readonly string[], guild: any, fallback: SearchT
     if (hits.length === 0) missing.push(raw);
   }
   return { targets, missing };
-};
-
-/** 1 チャンネルを遡り、条件に合うものを集める */
-const searchChannel = async (
-  target: SearchTarget,
-  query: SearchQuery,
-  need: number,
-  budget: number,
-): Promise<{ hits: any[], scanned: number }> => {
-  const hits: any[] = [];
-  let scanned = 0;
-  let before: string | undefined;
-  // after があれば、そこより古くなったら止める (取得自体も after で絞る)
-  const afterId = query.after !== undefined ? SnowflakeUtil.generate({ timestamp: query.after }).toString() : undefined;
-
-  while (scanned < budget && hits.length < need) {
-    const limit = Math.min(SEARCH_PAGE, budget - scanned);
-    let batch: Map<string, any>;
-    try {
-      batch = await target.messages.fetch({
-        limit,
-        ...(before !== undefined ? { before } : {}),
-        ...(afterId !== undefined ? { after: afterId } : {}),
-      });
-    } catch {
-      break; // 読めないチャンネルは飛ばす
-    }
-    if (batch.size === 0) break;
-    let oldest = Number.MAX_SAFE_INTEGER;
-    for (const m of batch.values()) {
-      scanned++;
-      if (typeof m?.createdTimestamp === 'number' && m.createdTimestamp < oldest) oldest = m.createdTimestamp;
-      if (matchesQuery(m, query)) hits.push(m);
-      if (hits.length >= need) break;
-    }
-    if (batch.size < limit) break; // これ以上古いものが無い
-    if (query.after !== undefined && oldest < query.after) break;
-    const oldestId = [...batch.keys()].reduce((a, b) => (BigInt(a) < BigInt(b) ? a : b));
-    if (oldestId === before) break;
-    before = oldestId;
-  }
-  return { hits, scanned };
 };
 
 /** 検索で使える has: の値 (公式検索の has に対応) */
@@ -380,18 +334,14 @@ const searchMessages: AITool = {
       query: { type: 'string', description: '検索語と条件 (上記の書き方)' },
       channels: { type: 'string', description: '対象チャンネル (#名前 / ID / URL をカンマ区切り)。"all" でサーバー全体。省略時は現在のチャンネル' },
       limit: { type: 'number', description: '返す最大件数 (既定 20, 最大 50)' },
-      scan: { type: 'number', description: '何件まで遡って調べるか (既定 1000, 最大 5000)。結果が少ないときは増やす' },
     },
   },
-  async execute({ query: rawQuery, channels, limit, scan }, { msg }) {
+  async execute({ query: rawQuery, channels, limit }, { msg }) {
     try {
       if (!msg.guild) return [false, { error: 'サーバー内でのみ使用できます' }];
       const query = parseSearchQuery(typeof rawQuery === 'string' ? rawQuery : '');
       const blacklist = config.blacklistedChannels ?? [];
       const limits = typeof limit === 'number' ? Math.min(Math.max(Math.trunc(limit), 1), 50) : 20;
-      const budgetTotal = typeof scan === 'number'
-        ? Math.min(Math.max(Math.trunc(scan), 50), SEARCH_SCAN_MAX)
-        : SEARCH_SCAN_DEFAULT;
 
       const current: SearchTarget = {
         id: msg.channel.id,
@@ -424,29 +374,26 @@ const searchMessages: AITool = {
         }];
       }
 
-      // まず公式の検索 API。使えないとき (権限不足・Fluxer・索引なし) だけ自前で遡る
+      // 公式の検索 API だけを使う (自前で遡るフォールバックは持たない)
       let collected: Array<{ message: any, target: SearchTarget }> = [];
-      let scanned = 0;
-      let via: 'api' | 'paging' = 'api';
       try {
         const result = await searchViaApi(msg, query, targets.map(t => t.id), limits);
         const byId = new Map(targets.map(t => [t.id, t]));
         for (const raw of result.messages) {
           const message = normalizeApiMessage(raw);
+          // API が解釈しない条件 (regex・len・-語・OR) はここで落とす
           if (!matchesQuery(message, query)) continue;
           const target = byId.get(String(message.channel_id)) ?? targets[0]!;
           collected.push({ message, target });
         }
       } catch (e) {
-        via = 'paging';
-        log('search: 公式検索が使えないので自前で遡ります:', e instanceof Error ? e.message : e);
-        const perChannel = Math.max(50, Math.floor(budgetTotal / targets.length));
-        for (const target of targets) {
-          const result = await searchChannel(target, query, limits - collected.length, perChannel);
-          scanned += result.scanned;
-          for (const message of result.hits) collected.push({ message, target });
-          if (collected.length >= limits) break;
-        }
+        const reason = e instanceof Error ? e.message : String(e);
+        log('search: 公式検索に失敗:', reason);
+        return [false, {
+          error: `Discord の検索 API に失敗しました: ${reason.slice(0, 300)}`,
+          hint: 'bot に READ_MESSAGE_HISTORY があり、MESSAGE_CONTENT の privileged intent が有効か確認してください。'
+            + '索引がまだのサーバーでは少し待ってからもう一度試してください。',
+        }];
       }
 
       collected.sort((a, b) => query.sort === 'old'
@@ -469,12 +416,10 @@ const searchMessages: AITool = {
 
       return [true, {
         query: describeQuery(query),
-        via,
         ...(query.ignored.length > 0 ? { ignoredOperators: query.ignored } : {}),
         ...(missing.length > 0 ? { unknownChannels: missing } : {}),
         // 名前だけだと、モデルが次のツール呼び出しで困る (ID を必ず添える)
         channels: targets.map(t => ({ id: t.id, name: t.name })),
-        ...(via === 'paging' ? { scanned } : {}),
         count: messages.length,
         ...(messages.length === 0
           ? { hint: '条件を緩めるか、期間 (after:) を広げてください。サーバー全体を見るには channels: "all"' }

@@ -321,8 +321,9 @@ Discord の検索 API (`GET /guilds/{id}/messages/search`) を使います。**b
 `READ_MESSAGE_HISTORY` 権限と `MESSAGE_CONTENT` privileged intent が要ります。
 索引がまだ無いサーバーでは `202` と `retry_after` が返るので、少し待って 1 回だけやり直します。
 
-使えないとき (権限不足、Fluxer、索引が用意できない) は、チャンネルを遡って自前で絞ります。
-そのときだけ `scan` (何件まで遡るか、既定 1,000・最大 5,000) が効きます。
+使えないとき (権限不足、Fluxer、索引が用意できない) は**エラーを返します**。チャンネルを遡る
+自前のフォールバックは持ちません (最新しか見ていないのに「全チャンネルを読んだ」と誤解させるため)。
+エラーには `READ_MESSAGE_HISTORY` と `MESSAGE_CONTENT` intent の確認を促すヒントを付けます。
 
 検索語は Discord の書き方 + 少し足したものです。
 

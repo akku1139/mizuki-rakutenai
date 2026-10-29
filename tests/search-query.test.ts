@@ -160,8 +160,7 @@ test('公式の検索 API に条件を渡し、結果を整形して返す', asy
   const result = await executeAITool('search_messages', { query: 'デプロイ from:tako has:file after:7d' }, meta(client, channel, members));
 
   assert.equal(result[0], true);
-  const value = result[1] as { count: number, via: string, messages: Array<{ id: string, at?: string }>, query: string };
-  assert.equal(value.via, 'api');
+  const value = result[1] as { count: number, messages: Array<{ id: string, at?: string }>, query: string };
   assert.equal(value.count, 2);
   assert.equal(value.messages[0]!.id, '20');
   assert.equal(value.messages[0]!.at, RECENT);
@@ -176,28 +175,15 @@ test('公式の検索 API に条件を渡し、結果を整形して返す', asy
   assert.ok(query.get('min_id'));
 });
 
-test('公式検索が使えないときは自前で遡る', async () => {
-  const fetched: unknown[] = [];
-  const channel = {
-    id: '2',
-    name: 'general',
-    isTextBased: () => true,
-    messages: {
-      fetch: async (options: unknown) => {
-        fetched.push(options);
-        return new Map([['20', fakeMessage('20', 'デプロイ 失敗した')]]);
-      },
-    },
-  };
+test('公式検索が使えないときはエラーを返す (自前で遡るフォールバックは持たない)', async () => {
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
   const { client } = fakeClient(() => { throw new Error('403 Missing Access'); });
   const result = await executeAITool('search_messages', { query: 'デプロイ' }, meta(client, channel));
 
-  assert.equal(result[0], true);
-  const value = result[1] as { via: string, count: number, messages: Array<{ id: string }> };
-  assert.equal(value.via, 'paging');
-  assert.equal(value.count, 1);
-  assert.equal(value.messages[0]!.id, '20');
-  assert.ok(fetched.length > 0);
+  assert.equal(result[0], false);
+  const error = result[1] as { error: string, hint: string };
+  assert.match(error.error, /403 Missing Access/);
+  assert.match(error.hint, /READ_MESSAGE_HISTORY/);
 });
 
 test('has: は公式検索が知っている種類だけを渡し、残りは自前で判定する', async () => {

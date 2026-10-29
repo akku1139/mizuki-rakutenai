@@ -115,8 +115,9 @@ docs/             機能ごとの仕様 (ai.md が AI の一次資料)
   `resource_link` / `image` / `audio` / `structuredContent` をテキストにする。text だけを見ると
   GitHub MCP の `get_file_contents` の中身が消える (実際にこれで読めなかった)。
 - **メッセージ検索は Discord の検索 API** (`search_messages`)。bot でも使える
-  (`GET /guilds/{id}/messages/search`、要 `READ_MESSAGE_HISTORY`)。使えないときだけ
-  チャンネルを遡る自前実装に落ちる。クエリの解釈は `src/ai/search-query.ts`。
+  (`GET /guilds/{id}/messages/search`、要 `READ_MESSAGE_HISTORY`)。**使えないときはエラーを返す**
+  (自前で遡るフォールバックは持たない — 最新しか見ていないのに網羅したと誤解させるため)。
+  クエリの解釈は `src/ai/search-query.ts`。
 - **返信の整形は `src/utils.ts`**: `numberMessageLinks` (Discord のメッセージリンクを
   `[(1)](<url>)` の出典番号に。初出順・同じ URL は同じ番号)、`suppressEmbeds` (URL を `<...>` で
   囲んで embed を止める。コード内は触らない)、`splitLongString` (1500 文字分割。コードブロックは
