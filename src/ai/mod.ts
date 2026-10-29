@@ -150,7 +150,7 @@ let aiProcessingJobs = 0;
 const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message[]> => {
   const parts = splitLongString(text
     .replace(/^####+ /gm, '### ')
-    .replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s>)]+)\\)/g, "[$1](<$2>)")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, "[$1](<$2>)")
   , 1500);
 
   const sentMessages: Message[] = [];
@@ -184,27 +184,27 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       return;
     }
     if (m.content === `<@${DISCORD_USER_ID}> chatlist` || m.content === `<@${FLUXER_USER_ID}> chatlist`) {
-      await m.reply(`job queue: \\`{ waiting: ${aiWaitingJobs}, processing : ${aiProcessingJobs} }\\`\\ncontext list:\\n\\`\\`\\`json\\n${JSON.stringify(Array.from(chatStore.entries()).map(([k, v]) => [k, v.provider, v.t.label]), null, 2)}\\n\\`\\`\\``);
+      await m.reply(`job queue: \`{ waiting: ${aiWaitingJobs}, processing : ${aiProcessingJobs} }\`\ncontext list:\n\`\`\`json\n${JSON.stringify(Array.from(chatStore.entries()).map(([k, v]) => [k, v.provider, v.t.label]), null, 2)}\n\`\`\``);
       return;
     }
 
     // aimodel [provider]: 呼び出したユーザーのAIバックエンドを表示/切り替える (=aimodel でも可)
-    const modelMatch = m.content.match(`^<@(${DISCORD_USER_ID}|${FLUXER_USER_ID})> =?aimodel(\\\\s+(\\\\S+))?$`);
+    const modelMatch = m.content.match(`^<@(${DISCORD_USER_ID}|${FLUXER_USER_ID})> =?aimodel(\\s+(\\S+))?$`);
     if (modelMatch) {
       const p = modelMatch[3];
       if (p === undefined) {
         const current = getUserProvider(m.author.id) ?? defaultProvider();
-        await m.reply(`your AI model: \\`${current}\\`\\navailable: ${PROVIDERS.map(x => `\\`${x}\\``).join(', ')}\\nusage: \\`@bot aimodel <provider>\\``);
+        await m.reply(`your AI model: \`${current}\`\navailable: ${PROVIDERS.map(x => `\`${x}\``).join(', ')}\nusage: \`@bot aimodel <provider>\``);
         return;
       }
       if (!isProviderName(p)) {
-        await m.reply(`unknown provider: \\`${p}\\`\\navailable: ${PROVIDERS.map(x => `\\`${x}\\``).join(', ')}`);
+        await m.reply(`unknown provider: \`${p}\`\navailable: ${PROVIDERS.map(x => `\`${x}\``).join(', ')}`);
         return;
       }
       try {
         await setUserProvider(m.author.id, p); // 永続化
         chatStore.delete(contextKey);          // 履歴はリセットして新モデルで開始
-        await m.reply(`AI model switched to \\`${p}\\`. chat context was reset.`);
+        await m.reply(`AI model switched to \`${p}\`. chat context was reset.`);
       } catch (e) {
         await m.reply(`failed to switch: ${e}`);
       }
@@ -266,7 +266,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         memoryBlock = recall({
           memory: await loadMemory(m.guild.id),
           userId: m.author.id,
-          text: [m.content, ...replied.map(r => r.content)].join('\\n'),
+          text: [m.content, ...replied.map(r => r.content)].join('\n'),
         }).text;
       } catch (e) {
         // 記憶が読めなくても会話は止めない
@@ -300,7 +300,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       }));
       const files = [...attachmentFiles, ...extraFiles.filter(f => f !== undefined)];
 
-      const input = rep + memoryBlock + (memoryBlock === '' ? '' : '\\n') + contextBlock;
+      const input = rep + memoryBlock + (memoryBlock === '' ? '' : '\n') + contextBlock;
 
       log(m.id, `[${chat.label}]`, input);
 
@@ -370,7 +370,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
               case 'tool-call-detail': {
                 log('fc:', gen);
-                const toolText = `-# ${gen.data.description !== '' ? `${gen.data.description} ` : ''}(\\`${gen.data.name}\\`)...`
+                const toolText = `-# ${gen.data.description !== '' ? `${gen.data.description} ` : ''}(\`${gen.data.name}\`)...`
                 if (!toolLogMsg)
                   try {
                     toolLogMsg = await m.channel.send(toolText);
@@ -389,7 +389,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
                 break;
 
               case 'error':
-                pending += `ERROR:\\n\\`\\`\\`json\\n${JSON.stringify(gen, null, 2)}\\n\\`\\`\\`\\n`;
+                pending += `ERROR:\n\`\`\`json\n${JSON.stringify(gen, null, 2)}\n\`\`\`\n`;
                 chatStore.delete(contextKey);
                 break;
 
@@ -407,7 +407,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
       let text = pending.trim();
       const usage = result.usage;
-      text += `\\n-# model: ${chat.label}${result.tools.size > 0 ? ` (${Array.from(result.tools, ([k, v]) => `\\`${k}\\`: ${v}`).join(', ')})` : ""}${usage !== undefined ? ` (tokens: ${formatUsage(usage)})` : ''}`;
+      text += `\n-# model: ${chat.label}${result.tools.size > 0 ? ` (${Array.from(result.tools, ([k, v]) => `\`${k}\`: ${v}`).join(', ')})` : ""}${usage !== undefined ? ` (tokens: ${formatUsage(usage)})` : ''}`;
       if (toolLogMsg) toolLogMsg.delete();
       const finalMsgs = await sendMessage(text, m, first);
       sentMessageIds.push(...finalMsgs.map(msg => msg.id));
@@ -417,8 +417,8 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       entry.lastIds = sentMessageIds;
 
     } catch (e) {
-      error(m.id, ': An error occurred during processing\\n', e);
-      await m.reply(`ERROR:\\n\\`\\`\\`\\n${e}\\n\\`\\`\\``);
+      error(m.id, ': An error occurred during processing\n', e);
+      await m.reply(`ERROR:\n\`\`\`\n${e}\n\`\`\``);
     } finally {
       --aiProcessingJobs;
       resolveNext();
