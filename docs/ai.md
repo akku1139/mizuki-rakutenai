@@ -136,6 +136,8 @@ OpenAI 公式のスキーマには無いフィールドなので、互換サー�
 ## 返信の送り方
 
 - 見出しの `####` 以下は `###` に揃えます
+- **Discord のメッセージリンクは `[(1)](<url>)` に置き換えます** (初出順の番号、同じ URL は同じ番号、
+  コード内はそのまま)。sakana と同じ出典の出し方で、本文に長い URL が並ばないようにします
 - リンクのプレビュー (embed) を出さないよう、URL を `<...>` で囲みます
   (`https://github.com/` → `<https://github.com/>`、`[GitHub](https://github.com/)` → `[GitHub](<https://github.com/>)`)。
   コードブロックとインラインコードの中は触りません (`src/utils.ts` の `suppressEmbeds`)

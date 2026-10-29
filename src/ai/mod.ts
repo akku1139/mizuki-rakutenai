@@ -16,7 +16,7 @@ import process from 'node:process';
 import { config, get } from '../config.ts';
 import { DISCORD_USER_ID, discord, FLUXER_USER_ID, fluxer } from '../clients.ts';
 import { whMapFluxer } from '../fluxsync/state.ts';
-import { createFileFromUrl, getFileName, isEffectivelyEmpty, splitLongString, suppressEmbeds } from '../utils.ts';
+import { createFileFromUrl, getFileName, isEffectivelyEmpty, numberMessageLinks, splitLongString, suppressEmbeds } from '../utils.ts';
 import { formatUsage, runAgent } from './agent.ts';
 import { buildContextBlock } from './context.ts';
 import { recall } from '../memory/recall.ts';
@@ -148,7 +148,7 @@ let aiWaitingJobs = 0;
 let aiProcessingJobs = 0;
 
 const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message[]> => {
-  const parts = splitLongString(suppressEmbeds(text.replace(/^####+ /gm, '### ')), 1500);
+  const parts = splitLongString(suppressEmbeds(numberMessageLinks(text.replace(/^####+ /gm, '### '))), 1500);
 
   const sentMessages: Message[] = [];
 

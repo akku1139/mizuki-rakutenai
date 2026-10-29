@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createFileFromUrl, getFileName, isEffectivelyEmpty, splitLongString, suppressEmbeds } from '../src/utils.ts';
+import { createFileFromUrl, getFileName, isEffectivelyEmpty, numberMessageLinks, splitLongString, suppressEmbeds } from '../src/utils.ts';
 
 test('splitLongString keeps short text as one part', () => {
   assert.deepEqual(splitLongString('abc', 3), ['abc']);
@@ -99,4 +99,40 @@ test('suppressEmbeds wraps bare URLs and markdown links, but not code', () => {
   assert.equal(suppressEmbeds('```\nhttps://github.com/\n```'), '```\nhttps://github.com/\n```');
   assert.equal(suppressEmbeds('両方 https://a.example/ と [b](https://b.example/)'),
     '両方 <https://a.example/> と [b](<https://b.example/>)');
+});
+
+test('numberMessageLinks replaces message links with numbered references', () => {
+  const a = 'https://discord.com/channels/1/2/3';
+  const b = 'https://discord.com/channels/1/2/4';
+  assert.equal(
+    numberMessageLinks(`前 ${a} 中 ${b} 後 ${a}`),
+    `前 [\(1\)](<${a}>) 中 [\(2\)](<${b}>) 後 [\(1\)](<${a}>)`,
+  );
+  // fluxer も同じ
+  assert.equal(
+    numberMessageLinks('https://fluxer.app/channels/9/8/7'),
+    '[\(1\)](<https://fluxer.app/channels/9/8/7>)',
+  );
+  // チャンネルだけのリンクは触らない
+  assert.equal(numberMessageLinks('https://discord.com/channels/1/2'), 'https://discord.com/channels/1/2');
+  // すでに番号付きのものは二重にしない
+  const numbered = `[\(1\)](<${a}>)`;
+  assert.equal(numberMessageLinks(numbered), numbered);
+  // コードの中は触らない
+  assert.equal(numberMessageLinks('`' + a + '`'), '`' + a + '`');
+  assert.equal(numberMessageLinks('```\n' + a + '\n```'), '```\n' + a + '\n```');
+});
+
+test('numbered message links are not wrapped again by suppressEmbeds', () => {
+  const a = 'https://discord.com/channels/1/2/3';
+  assert.equal(suppressEmbeds(numberMessageLinks(`see ${a}`)), `see [\(1\)](<${a}>)`);
+});
+
+test('numberMessageLinks keeps markdown links to messages intact', () => {
+  const a = 'https://discord.com/channels/1/2/3';
+  assert.equal(numberMessageLinks(`[この発言](${a}) を見て`), `[\(1\)](<${a}>) を見て`);
+  assert.equal(
+    numberMessageLinks(`[a](${a}) と [b](https://discord.com/channels/1/2/4)`),
+    `[\(1\)](<${a}>) と [\(2\)](<https://discord.com/channels/1/2/4>)`,
+  );
 });

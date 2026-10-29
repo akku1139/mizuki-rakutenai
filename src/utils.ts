@@ -90,6 +90,33 @@ export const splitLongString = (text: string, len: number): Array<string> => {
   return result;
 };
 
+/** Discord / Fluxer のメッセージリンク (チャンネルやサーバーだけのリンクは対象外) */
+const MESSAGE_LINK = /(?<!<)https?:\/\/(?:canary\.|ptb\.)?(?:discord(?:app)?\.com|fluxer\.app)\/channels\/\d+\/\d+\/\d+/g;
+
+/**
+ * メッセージリンクを `[(1)](<url>)` の形に置き換える (sakana と同じ出典の出し方)。
+ *
+ * 本文に 88 文字の URL が並ぶと読みにくいので、初出順の番号を振って短く出す。
+ * 同じ URL には同じ番号を使う。すでに `[(n)](<url>)` になっているものは触らず、
+ * コードブロックとインラインコードの中も触らない。
+ */
+export const numberMessageLinks = (text: string): string => {
+  const numbers = new Map<string, number>();
+  const ref = (url: string): string => {
+    const no = numbers.get(url) ?? numbers.size + 1;
+    numbers.set(url, no);
+    return `[(${no})](<${url}>)`;
+  };
+  const linkToMessage = new RegExp(`\\[([^\\]]*)\\]\\((${MESSAGE_LINK.source.slice('(?<!<)'.length)})\\)`, 'g');
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((part, index) => (index % 2 === 1
+      ? part
+      // `[この発言](url)` はリンクごと番号付きに置き換える (URL だけ差し替えると壊れる)
+      : part.replace(linkToMessage, (_match, _label: string, url: string) => ref(url)).replace(MESSAGE_LINK, ref)))
+    .join('');
+};
+
 /**
  * Discord に送る前に URL を `<...>` で囲み、リンクのプレビュー (embed) を出さない。
  *
