@@ -341,6 +341,12 @@ const searchMessages: AITool = {
   async execute({ query: rawQuery, channels, limit }, { msg }) {
     try {
       if (!msg.guild) return [false, { error: 'サーバー内でのみ使用できます' }];
+      if (rawQuery !== undefined && typeof rawQuery !== 'string') {
+        return [false, {
+          error: `query は文字列で指定してください (受け取ったのは ${Array.isArray(rawQuery) ? '配列' : typeof rawQuery})`,
+          hint: '例: { "query": "GMO" } / { "query": "techfish has:image after:7d" }',
+        }];
+      }
       const query = parseSearchQuery(typeof rawQuery === 'string' ? rawQuery : '');
       const blacklist = config.blacklistedChannels ?? [];
       const limits = typeof limit === 'number' ? Math.min(Math.max(Math.trunc(limit), 1), 50) : 20;
@@ -456,6 +462,13 @@ const searchMessages: AITool = {
 
       return [true, {
         query: describeQuery(query),
+        // 実際に API に渡した条件 (モデルが「何を検索したか」を確認できるように)
+        request: {
+          content: contents.filter(c => c !== undefined).join(' OR ') || null,
+          channels: targets.map(t => `${t.name}(${t.id})`),
+          ...(query.after !== undefined ? { after: new Date(query.after).toISOString() } : {}),
+          ...(query.before !== undefined ? { before: new Date(query.before).toISOString() } : {}),
+        },
         ...(query.ignored.length > 0 ? { ignoredOperators: query.ignored } : {}),
         ...(unsupported.length > 0 ? { unsupportedOperators: unsupported } : {}),
         ...(missing.length > 0 ? { unknownChannels: missing } : {}),

@@ -333,3 +333,22 @@ test('チャンネルを指定しないときは、そのことを結果に書�
   const result = await executeAITool('search_messages', { query: 'techfish' }, meta(client, channel));
   assert.match(String((result[1] as { scope?: string }).scope), /現在のチャンネルだけ/);
 });
+
+test('実際に検索した条件を結果に含める (モデルが確認できる)', async () => {
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const { client } = fakeClient(() => ({ total_results: 1, messages: [[apiMessage('20', 'GMO の話')]] }));
+  const result = await executeAITool('search_messages', { query: 'GMO' }, meta(client, channel));
+  const value = result[1] as { request: { content: string | null, channels: string[] } };
+  assert.equal(value.request.content, 'gmo');
+  assert.deepEqual(value.request.channels, ['#general(2)']);
+});
+
+test('query が文字列でなければ断る (空扱いにしない)', async () => {
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  let calls = 0;
+  const { client } = fakeClient(() => { calls++; return { total_results: 0, messages: [] }; });
+  const result = await executeAITool('search_messages', { query: { q: 'GMO' } }, meta(client, channel));
+  assert.equal(result[0], false);
+  assert.match(String((result[1] as { error: string }).error), /文字列で指定/);
+  assert.equal(calls, 0);
+});
