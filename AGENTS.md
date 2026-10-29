@@ -111,6 +111,8 @@ docs/             機能ごとの仕様 (ai.md が AI の一次資料)
 - **メッセージ検索は Discord の検索 API** (`search_messages`)。bot でも使える
   (`GET /guilds/{id}/messages/search`、要 `READ_MESSAGE_HISTORY`)。使えないときだけ
   チャンネルを遡る自前実装に落ちる。クエリの解釈は `src/ai/search-query.ts`。
+- **返信の整形は `src/utils.ts`**: `suppressEmbeds` (URL を `<...>` で囲んで embed を止める。
+  コード内は触らない) と `splitLongString` (1500 文字分割。コードブロックはフェンスを付け直して壊さない)。
 - **docs が仕様書です**。`docs/ai.md` にはプロバイダの違い、文脈の組み立て、添付ファイルの扱い、
   ツール一覧、429 対策が書いてあります。コードを読む前にここを読むのが速いです。
 - ハードコードされたサーバー ID・チャンネル ID・ロール ID が多数あります

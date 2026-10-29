@@ -3,29 +3,108 @@ import { log, info, warn, error } from './log.ts';
 
 /// Small platform-independent helpers.
 
-export const splitLongString = (text: string, len: number): Array<string> => {
+/** 改行を優先して切る (コードブロックを考えない素朴な分割) */
+const splitPlain = (text: string, len: number): Array<string> => {
   const result: Array<string> = [];
-
   let rest = text;
-  while(true) {
-    if(rest.length <= len) {
+  while (true) {
+    if (rest.length <= len) {
       result.push(rest);
       break;
     }
     const part = rest.substring(0, len);
     const i = part.lastIndexOf('\n');
-    if(i === -1) {
+    if (i === -1) {
       result.push(part);
       rest = rest.substring(len);
     } else {
-      result.push(part.substring(0, i+1)); // i+1をiにすると改行は消化される
-      rest = rest.substring(i+1);
+      result.push(part.substring(0, i + 1)); // i+1をiにすると改行は消化される
+      rest = rest.substring(i + 1);
     }
-    if(rest==='') break;
+    if (rest === '') break;
+  }
+  return result;
+};
+
+/** コードブロック 1 つを、フェンスを保ったまま分割する (シンタックスハイライトを保つ) */
+const splitCode = (lang: string, body: string, len: number): Array<string> => {
+  const open = `\`\`\`${lang}\n`;
+  // 本文が改行で終わっているときは、閉じフェンスの前に改行を足さない (元の文面を保つ)
+  const closeFence = '```';
+  const whole = `${open}${body}${body.endsWith('\n') ? '' : '\n'}${closeFence}`;
+  if (whole.length <= len) return [whole];
+  const close = '\n```';
+  // フェンスで囲み直せないほど小さいときは、素朴に切るしかない
+  const room = len - open.length - close.length;
+  if (room < 8) return splitPlain(whole, len);
+
+  const trimmed = body.endsWith('\n') ? body.slice(0, -1) : body;
+  const parts = splitPlain(trimmed, room)
+    .map(p => p.replace(/\n$/, ''))
+    .filter(p => p !== '');
+  return parts.map(p => `${open}${p}${close}`);
+};
+
+/**
+ * 長い文字列を Discord の上限に合わせて分割する。
+ *
+ * コードブロックは壊さない: 収まるならそのまま 1 チャンク、収まらないなら
+ * フェンス (` ```lang `) を付け直して分割する (シンタックスハイライトは保たれる)。
+ */
+export const splitLongString = (text: string, len: number): Array<string> => {
+  const pieces: Array<string> = [];
+  const fence = /```([^\n]*)\n([\s\S]*?)```/g;
+  let last = 0;
+  for (const match of text.matchAll(fence)) {
+    const start = match.index ?? 0;
+    if (start > last) pieces.push(...splitPlain(text.slice(last, start), len));
+    pieces.push(...splitCode(match[1] ?? '', match[2] ?? '', len));
+    last = start + match[0].length;
+  }
+  const tail = text.slice(last);
+  // 閉じていないフェンスが残っていたら、そこから先はコードとして扱う
+  const open = tail.indexOf('```');
+  if (open >= 0) {
+    if (open > 0) pieces.push(...splitPlain(tail.slice(0, open), len));
+    const after = tail.slice(open + 3);
+    const newline = after.indexOf('\n');
+    const lang = newline < 0 ? after : after.slice(0, newline);
+    const body = newline < 0 ? '' : after.slice(newline + 1);
+    pieces.push(...splitCode(lang, body, len));
+  } else if (tail !== '') {
+    pieces.push(...splitPlain(tail, len));
   }
 
-  return result; // 空文字列をfilterしてあげればいい
+  // ピースを詰め直す (どのピースも len 以下)
+  const result: Array<string> = [];
+  let current = '';
+  for (const piece of pieces) {
+    if (piece === '') continue;
+    if (current !== '' && current.length + piece.length > len) {
+      result.push(current);
+      current = '';
+    }
+    current += piece;
+  }
+  if (current !== '' || result.length === 0) result.push(current);
+  return result;
 };
+
+/**
+ * Discord に送る前に URL を `<...>` で囲み、リンクのプレビュー (embed) を出さない。
+ *
+ * - コードブロックとインラインコードの中は触らない
+ * - `[text](url)` は `[text](<url>)` に
+ * - 裸の URL は `<url>` に (すでに囲んであるものは二重にしない)
+ * - 末尾の句読点は URL に含めない
+ */
+export const suppressEmbeds = (text: string): string =>
+  text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((part, index) => (index % 2 === 1 ? part : part
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, '[$1](<$2>)')
+      .replace(/(?<![<(])(https?:\/\/[^\s<>()\]]*[^\s<>()\].,;:!?、。])/g, '<$1>')))
+    .join('');
 
 export const isEffectivelyEmpty = (text: string): boolean => {
   // 正規表現の解説:

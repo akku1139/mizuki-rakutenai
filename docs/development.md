@@ -74,6 +74,15 @@ pnpm typecheck   # tsc --noEmit
 
 GitHub Actions (`.github/workflows/ci.yml`) で、main への push と PR のたびに両方を実行します。
 
+## 返信の組み立て
+
+`src/ai/mod.ts` が返信を送る前に `src/utils.ts` を通します。
+
+- `suppressEmbeds`: URL を `<...>` で囲む (リンクのプレビューを出さない)。コードブロック・
+  インラインコードの中は触らない
+- `splitLongString`: 1500 文字で分割。**コードブロックは壊さない** — 収まるものはそのまま、
+  収まらないものはフェンスを付け直して分割する (`issue#3`)
+
 ## コーディング規約
 
 - ファイルの先頭に `// SPDX-License-Identifier: AGPL-3.0-or-later` を書きます
