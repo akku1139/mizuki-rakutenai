@@ -150,7 +150,7 @@ let aiProcessingJobs = 0;
 const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean): Promise<Message[]> => {
   const parts = splitLongString(text
     .replace(/^####+ /gm, '### ')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, "[$1](<$2>)")
+    .replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s>)]+)\\)/g, "[$1](<$2>)")
   , 1500);
 
   const sentMessages: Message[] = [];
@@ -266,7 +266,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         memoryBlock = recall({
           memory: await loadMemory(m.guild.id),
           userId: m.author.id,
-          text: [m.content, ...replied.map(r => r.content)].join('\n'),
+          text: [m.content, ...replied.map(r => r.content)].join('\\n'),
         }).text;
       } catch (e) {
         // 記憶が読めなくても会話は止めない
@@ -300,7 +300,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       }));
       const files = [...attachmentFiles, ...extraFiles.filter(f => f !== undefined)];
 
-      const input = rep + memoryBlock + (memoryBlock === '' ? '' : '\n') + contextBlock;
+      const input = rep + memoryBlock + (memoryBlock === '' ? '' : '\\n') + contextBlock;
 
       log(m.id, `[${chat.label}]`, input);
 
