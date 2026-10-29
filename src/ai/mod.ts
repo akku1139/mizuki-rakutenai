@@ -234,7 +234,16 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       ++aiProcessingJobs;
       info(m.id, ': start');
 
-      m.channel.sendTyping();
+      // 直近にメッセージを送った時刻。sendTyping がメッセージ送信直後に typing を
+      // 再表示してしまうのを防ぐためのガード用。
+      let lastMessageSentAt = 0;
+      const sendTyping = (): void => {
+        // メッセージを送った直後 (8秒以内) は typing を出さない
+        if (Date.now() - lastMessageSentAt < 8000) return;
+        m.channel.sendTyping();
+      };
+
+      sendTyping();
 
       // ★ 最後に自分が投稿したメッセージID（存在すれば after に指定）
       const lastBotMsgId = entry.lastIds.length > 0
@@ -308,6 +317,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         sentMessageIds.push(...msgs.map(msg => msg.id));
         pending = '';
         first = false;
+        lastMessageSentAt = Date.now();
       };
 
       const result = await runAgent(
@@ -319,7 +329,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         { msg: m },
         {
           tickEvery: 7,
-          onTick: () => { m.channel.sendTyping(); },
+          onTick: () => { sendTyping(); },
           onEvent: async (gen) => {
             switch (gen.type) {
               case 'reasoning-start':
@@ -338,7 +348,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
               case 'image-thumbnail':
               case 'image':
                 log('image:', gen.url);
-                m.channel.sendTyping();
+                sendTyping();
 
                 await flushText();
 
@@ -347,6 +357,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
                   const msgs = await sendMessage(gen.url, m, first);
                   last = msgs[0];
                   sentMessageIds.push(...msgs.map(msg => msg.id));
+                  lastMessageSentAt = Date.now();
                 }
 
                 if (gen.type === 'image') last = void 0;
@@ -354,7 +365,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
               case 'tool-call':
                 log('function call:');
-                m.channel.sendTyping();
+                sendTyping();
                 break;
 
               case 'tool-call-detail': {
@@ -363,6 +374,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
                 if (!toolLogMsg)
                   try {
                     toolLogMsg = await m.channel.send(toolText);
+                    lastMessageSentAt = Date.now();
                   } catch (e) {
                     error('error:', e);
                   }
@@ -373,7 +385,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
               case 'tool-result':
                 log('tool result:', gen.data);
-                m.channel.sendTyping();
+                sendTyping();
                 break;
 
               case 'error':
@@ -399,6 +411,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
       if (toolLogMsg) toolLogMsg.delete();
       const finalMsgs = await sendMessage(text, m, first);
       sentMessageIds.push(...finalMsgs.map(msg => msg.id));
+      lastMessageSentAt = Date.now();
 
       // 今回のメッセージIDを保存
       entry.lastIds = sentMessageIds;
