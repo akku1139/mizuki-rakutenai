@@ -317,6 +317,58 @@ API が 400 を返してそのセッションは捨てられます** (小さい�
 
 ## メッセージ検索 (`search_messages`)
 
+Discord の検索 API (`GET /guilds/{id}/messages/search`) だけを使います。bot でも使えますが、
+`READ_MESSAGE_HISTORY` 権限と `MESSAGE_CONTENT` privileged intent が要ります。
+索引がまだ無いサーバーでは `202` と `retry_after` が返るので、少し待って 1 回だけやり直します。
+
+**ローカルで絞り直すことはしません** (API の判定をそのまま信じます)。API が失敗したら、
+理由と確認事項を添えてエラーを返します。チャンネルを遡るフォールバックは持ちません
+(最新しか見ていないのに「全チャンネルを読んだ」と誤解させるため)。
+
+検索語は Discord の書き方 + 少し足したものです。**API が解釈するものだけ**を渡します。
+
+| 書き方 | 内容 | API |
+|---|---|---|
+| `語` | すべて含む (AND) | `content` |
+| `"フレーズ"` | 空白込みの一致 | `content` |
+| `-語` | 含まない | `content` (`-語`) |
+| `語 OR 語` | どちらか | **API 非対応** → 語ごとに 1 回ずつ検索してまとめる |
+| `from:名前/ID` | 投稿者。名前はメンバーから解決 (キャッシュ → 問い合わせ) | `author_id` |
+| `in:#チャンネル` / `in:ID` / `in:URL` | 対象チャンネル (`channels: "all"` でサーバー全体・最大12) | `channel_id` |
+| `mentions:ユーザーID` | メンション先 | `mentions` |
+| `has:image` `has:file` `has:link` `has:embed` `has:sticker` `has:poll` `has:video` `has:sound` | 添付・埋め込みの種類 | `has` |
+| `before:` `after:` `during:` `on:` | 期間 (絶対・相対 `7d` など) | `max_id` / `min_id` |
+| `is:pinned` | ピン留め | `pinned` |
+| `sort:old` | 古い順 | `sort_order` |
+| `regex:/…/i` `len:>100` | — | **API 非対応**。`unsupportedOperators` として返す (これだけのクエリはエラー) |
+
+日本語の長い文 (`techfishの不祥事について教えて`) は、助詞・依頼表現で割ってから `content` に渡します
+(そのまま渡すと API は 0 件を返します)。
+
+結果には `channels: [{ id, name }]` を返すので、続けて `fetch_messages_history` を呼ぶときにそのまま
+ID を渡せます。見つからないチャンネルは `近い候補: #…` を返します。
+
+## MCP ツール
+
+`data/config.json` の `mcpServers` でつないだ MCP サーバーのツールを、モデルから使えるようにします
+(`src/ai/mcp.ts` / `src/ai/mcp-registry.ts`)。実装は teapot のクライアントの移植です。
+
+- ツールが 20 個以下なら、そのまま `mcp__<サーバー名>__<ツール名>` として並べます
+- それを超えると、`search_tools` (キーワード検索) と `run_tool` (tool_id を指定して実行) の 2 つに畳みます。
+  `search_tools` は既定で引数のスキーマを返しません (トークンを使うため)。必要なら `include_schema: true`
+- ツール定義は**リクエストのたびに引き直します** (`ToolSpec.definitions` は関数でもよい)。
+  MCP サーバーは再接続でツールが増減するので、セッション生成時の一覧を固定すると、
+  接続が切れた瞬間に作られたセッションが以後ずっと MCP ツール無しになります
+  (エラーでセッションが作り直された直後がこれに当たりました)
+- ツールの結果は **text だけではありません**。`resource` (埋め込みリソース)・`resource_link`・
+  `image`・`audio`・`structuredContent` をすべてテキストにします。`resource` が `text` を持たず
+  `uri` だけなら `resources/read` で取りに行きます。ここを text だけにすると、GitHub MCP の
+  `get_file_contents` のようなサーバーが返す**ファイルの中身がまるごと捨てられ**、
+  モデルには `[resource content omitted]` しか届きません
+- 失敗したツールは `ok=false` として、エラー本文を `{ error }` で返します
+
+## メッセージ検索 (`search_messages`)
+
 Discord の検索 API (`GET /guilds/{id}/messages/search`) を使います。**bot からも使えます**が、
 `READ_MESSAGE_HISTORY` 権限と `MESSAGE_CONTENT` privileged intent が要ります。
 索引がまだ無いサーバーでは `202` と `retry_after` が返るので、少し待って 1 回だけやり直します。

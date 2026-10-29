@@ -16,7 +16,7 @@ import process from 'node:process';
 import { discord, fluxer } from '../clients.ts';
 import { callMcpTool, getMcpTools } from './mcp-registry.ts';
 import { flattenToolName } from './mcp.ts';
-import { describeQuery, matchesQuery, parseSearchQuery, type SearchQuery } from './search-query.ts';
+import { describeQuery, parseSearchQuery, type SearchQuery } from './search-query.ts';
 import { memoryTool } from '../memory/tools.ts';
 import { config, get } from '../config.ts';
 import { describeEmbed, describeMessage } from './embeds.ts';
@@ -209,6 +209,7 @@ interface OfficialSearchResult {
  */
 const searchViaApi = async (
   msg: OmitPartialGroupDMChannel<Message<boolean>>,
+  content: string | undefined,
   query: SearchQuery,
   channelIds: string[],
   limit: number,
@@ -240,7 +241,7 @@ const searchViaApi = async (
   }
 
   const base: Record<string, unknown> = {
-    content: [...query.terms, ...query.phrases.map(p => `"${p}"`), ...query.anyOf].join(' ').trim() || undefined,
+    content,
     channel_id: channelIds.length > 0 ? channelIds : [msg.channelId],
     ...(authorIds.length > 0 ? { author_id: authorIds } : {}),
     ...(query.mentions.length > 0 ? { mentions: query.mentions } : {}),
@@ -374,17 +375,42 @@ const searchMessages: AITool = {
         }];
       }
 
-      // 公式の検索 API だけを使う (自前で遡るフォールバックは持たない)
+      // 公式の検索 API だけを使う。ローカルで絞り直さない (API の判定をそのまま信じる)
+      const unsupported: string[] = [];
+      if (query.regex !== undefined) unsupported.push('regex');
+      if (query.minLength !== undefined || query.maxLength !== undefined) unsupported.push('len');
+
+      // API に渡せる条件。content は語 + フレーズ + 除外語
+      const words = [...query.terms, ...query.phrases.map(p => `"${p}"`), ...query.notTerms.map(t => `-${t}`)].join(' ').trim();
+      const hasRestriction = words !== '' || query.from.length > 0 || query.mentions.length > 0
+        || query.has.length > 0 || query.pinned === true || query.after !== undefined || query.before !== undefined;
+
+      if (!hasRestriction && unsupported.length > 0) {
+        return [false, {
+          error: `この条件は Discord の検索 API では使えません: ${unsupported.join(', ')}`,
+          hint: '語・from:・in:・mentions:・has:・before:/after:・is:pinned で指定してください。'
+            + 'regex と len は API が解釈しません。',
+        }];
+      }
+
+      // OR は API が解釈しないので、1 つずつ検索してまとめる
+      const contents = query.anyOf.length > 0
+        ? query.anyOf.map(alt => (words === '' ? alt : `${words} ${alt}`))
+        : [words === '' ? undefined : words];
+
       let collected: Array<{ message: any, target: SearchTarget }> = [];
+      const seen = new Set<string>();
       try {
-        const result = await searchViaApi(msg, query, targets.map(t => t.id), limits);
-        const byId = new Map(targets.map(t => [t.id, t]));
-        for (const raw of result.messages) {
-          const message = normalizeApiMessage(raw);
-          // API が解釈しない条件 (regex・len・-語・OR) はここで落とす
-          if (!matchesQuery(message, query)) continue;
-          const target = byId.get(String(message.channel_id)) ?? targets[0]!;
-          collected.push({ message, target });
+        for (const content of contents) {
+          const result = await searchViaApi(msg, content, query, targets.map(t => t.id), limits);
+          const byId = new Map(targets.map(t => [t.id, t]));
+          for (const raw of result.messages) {
+            if (seen.has(raw.id)) continue;
+            seen.add(raw.id);
+            const target = byId.get(String(raw.channel_id)) ?? targets[0]!;
+            collected.push({ message: normalizeApiMessage(raw), target });
+          }
+          if (collected.length >= limits) break;
         }
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e);
@@ -417,6 +443,7 @@ const searchMessages: AITool = {
       return [true, {
         query: describeQuery(query),
         ...(query.ignored.length > 0 ? { ignoredOperators: query.ignored } : {}),
+        ...(unsupported.length > 0 ? { unsupportedOperators: unsupported } : {}),
         ...(missing.length > 0 ? { unknownChannels: missing } : {}),
         // 名前だけだと、モデルが次のツール呼び出しで困る (ID を必ず添える)
         channels: targets.map(t => ({ id: t.id, name: t.name })),

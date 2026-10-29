@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { describeQuery, matchesQuery, parseSearchQuery, parseWhen } from '../src/ai/search-query.ts';
+import { describeQuery, parseSearchQuery, parseWhen } from '../src/ai/search-query.ts';
 
 process.env['READABILITY_ENDPOINT'] = 'https://readability.invalid/read';
 process.env['SEARCH_ENDPOINT'] = 'https://search.invalid/search';
@@ -48,37 +48,6 @@ test('知らない演算子は捨てて、結果に添える', () => {
   const q = parseSearchQuery('foo unknownbar:1', NOW);
   assert.deepEqual(q.ignored, ['unknownbar:1']);
   assert.deepEqual(q.terms, ['foo']);
-});
-
-const message = (over: Partial<Parameters<typeof matchesQuery>[0]> = {}) => ({
-  content: 'デプロイ 失敗した',
-  createdTimestamp: Date.parse('2026-10-20T00:00:00Z'),
-  author: { id: 'u1', username: 'tako', globalName: 'Tako', displayName: 'たこ' },
-  embeds: [],
-  attachments: { size: 0 },
-  stickers: { size: 0 },
-  reactions: { cache: { size: 0 } },
-  ...over,
-});
-
-test('条件は取得したメッセージに対して評価する', () => {
-  const m = message();
-  assert.equal(matchesQuery(m, parseSearchQuery('デプロイ', NOW)), true);
-  assert.equal(matchesQuery(m, parseSearchQuery('デプロイ -失敗', NOW)), false);
-  assert.equal(matchesQuery(m, parseSearchQuery('from:たこ', NOW)), true);
-  assert.equal(matchesQuery(m, parseSearchQuery('from:u1', NOW)), true);
-  assert.equal(matchesQuery(m, parseSearchQuery('from:さば', NOW)), false);
-  assert.equal(matchesQuery(m, parseSearchQuery('after:2026-10-01', NOW)), true);
-  assert.equal(matchesQuery(m, parseSearchQuery('after:2026-10-25', NOW)), false);
-  assert.equal(matchesQuery(m, parseSearchQuery('before:2026-10-25', NOW)), true);
-  assert.equal(matchesQuery(m, parseSearchQuery('has:embed', NOW)), false);
-  assert.equal(matchesQuery(m, parseSearchQuery('has:embed', NOW)), false);
-  assert.equal(matchesQuery(message({ embeds: [{}] }), parseSearchQuery('has:embed', NOW)), true);
-  assert.equal(matchesQuery(m, parseSearchQuery('len:<5', NOW)), false);
-  assert.equal(matchesQuery(m, parseSearchQuery('is:pinned', NOW)), false);
-  assert.equal(matchesQuery(message({ pinned: true }), parseSearchQuery('is:pinned', NOW)), true);
-  assert.equal(matchesQuery(m, parseSearchQuery('Go OR Rust', NOW)), false);
-  assert.equal(matchesQuery(message({ content: 'Rust の話' }), parseSearchQuery('Go OR Rust', NOW)), true);
 });
 
 const fakeMessage = (id: string, content: string, extra: object = {}) => ({
@@ -186,7 +155,7 @@ test('公式検索が使えないときはエラーを返す (自前で遡るフ
   assert.match(error.hint, /READ_MESSAGE_HISTORY/);
 });
 
-test('has: は公式検索が知っている種類だけを渡し、残りは自前で判定する', async () => {
+test('has: はそのまま検索 API に渡す', async () => {
   const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
   const { calls, client } = fakeClient(() => ({
     messages: [[apiMessage('20', 'デプロイ', { attachments: [{ id: 'a', filename: 'a.png', content_type: 'image/png' }] })]],
@@ -195,6 +164,41 @@ test('has: は公式検索が知っている種類だけを渡し、残りは自
   assert.equal(result[0], true);
   assert.equal(calls[0]!.query.get('has'), 'image');
   assert.equal((result[1] as { count: number }).count, 1);
+});
+
+test('日本語の長い文は語に割ってから検索する', () => {
+  assert.deepEqual(parseSearchQuery('techfishの不祥事について教えて').terms, ['techfish', '不祥事']);
+  assert.deepEqual(parseSearchQuery('メンション攻撃の記録を探して').terms, ['メンション攻撃', '記録']);
+  // フレーズは割らない
+  assert.deepEqual(parseSearchQuery('"PRをマージしろ"').phrases, ['prをマージしろ']);
+});
+
+test('OR は API が解釈しないので、1 つずつ検索してまとめる', async () => {
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const contents: string[] = [];
+  const { client } = fakeClient((_path, options) => {
+    const query = (options as { query: URLSearchParams }).query;
+    contents.push(String(query.get('content')));
+    const term = query.get('content') ?? '';
+    return {
+      total_results: 1,
+      messages: [[apiMessage(term.includes('techfish') ? '20' : '21', term)]],
+    };
+  });
+  const result = await executeAITool('search_messages', { query: 'techfish OR 不祥事' }, meta(client, channel));
+  assert.equal(result[0], true);
+  assert.deepEqual(contents, ['techfish', '不祥事'], '語ごとに 1 回ずつ検索する');
+  assert.equal((result[1] as { count: number }).count, 2, '結果はまとめる');
+});
+
+test('API が解釈しない条件だけのクエリは、黙って全件を返さずエラーにする', async () => {
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const { client } = fakeClient(() => ({ total_results: 0, messages: [] }));
+  for (const query of ['regex:/techfish/i', 'len:>50']) {
+    const result = await executeAITool('search_messages', { query }, meta(client, channel));
+    assert.equal(result[0], false, query);
+    assert.match(String((result[1] as { error: string }).error), /使えません/);
+  }
 });
 
 test('索引がまだ無い (202) と言われたら 1 回だけ待ってやり直す', async () => {

@@ -45,6 +45,26 @@ export interface SearchQuery {
   ignored: string[];
 }
 
+/**
+ * 日本語の長い塊を、検索 API が扱える語に割る。
+ *
+ * Discord の `content` は語の一致で探すので、`techfishの不祥事について教えて` のような
+ * 文をそのまま渡すと 0 件になる (実測)。助詞・依頼表現で切って `techfish 不祥事` にする。
+ */
+export const japaneseTerms = (text: string): string[] => {
+  if (!/[\u3040-\u30ff\u4e00-\u9faf]/.test(text) || text.length < 4) return [text];
+  const separators = [
+    'について', 'に関して', 'という', 'って', 'を', 'が', 'は', 'に', 'で', 'と', 'の', 'や', 'も', 'へ',
+    'から', 'まで', 'より', '教えて', '探して', '調べて', '見せて', 'ください', 'おしえて', 'さがして',
+  ];
+  let rest = text;
+  for (const sep of separators) rest = rest.split(sep).join(' ');
+  return rest
+    .split(/[\s　、。,.!?！？「」『』()（）]+/)
+    .map(t => t.trim())
+    .filter(t => t.length >= 2);
+};
+
 export const EMPTY_QUERY = (): SearchQuery => ({
   terms: [], phrases: [], anyOf: [], notTerms: [], from: [], channels: [], mentions: [], has: [],
   sort: 'new', ignored: [],
@@ -232,6 +252,19 @@ export const parseSearchQuery = (raw: string, now = Date.now()): SearchQuery => 
       pendingOr = false;
       continue;
     }
+    if (token.quoted) {
+      operands.push({ text, quoted: true, negated: token.negated, orBefore: pendingOr });
+      pendingOr = false;
+      continue;
+    }
+    {
+      // 長い日本語の塊は語に割る (API は語の一致で探すため)
+      for (const term of japaneseTerms(text)) {
+        operands.push({ text: term, quoted: false, negated: token.negated, orBefore: pendingOr });
+        pendingOr = false;
+      }
+      continue;
+    }
     operands.push({ text, quoted: token.quoted, negated: token.negated, orBefore: pendingOr });
     pendingOr = false;
   }
@@ -254,89 +287,6 @@ export const parseSearchQuery = (raw: string, now = Date.now()): SearchQuery => 
     i = j - 1;
   }
   return query;
-};
-
-/** 検索対象のメッセージ (discord.js の Message のうち、判定に使う部分だけ) */
-export interface SearchableMessage {
-  content: string;
-  createdTimestamp: number;
-  pinned?: boolean;
-  author?: { id?: string, username?: string, globalName?: string | null, displayName?: string | null };
-  mentions?: { users?: { has(id: string): boolean, keys?(): IterableIterator<string> } };
-  embeds?: readonly unknown[];
-  attachments?: { size: number, values?: () => IterableIterator<{ contentType?: string | null }> };
-  stickers?: { size: number };
-  poll?: unknown;
-  reactions?: { cache?: { size: number } };
-}
-
-const authorNames = (m: SearchableMessage): string[] => [
-  m.author?.id ?? '',
-  m.author?.username ?? '',
-  m.author?.globalName ?? '',
-  m.author?.displayName ?? '',
-].map(s => s.toLowerCase()).filter(s => s !== '');
-
-const hasType = (m: SearchableMessage, type: string): boolean => {
-  const content = m.content ?? '';
-  switch (type) {
-    case 'link':
-      return /https?:\/\//i.test(content);
-    case 'embed':
-      return (m.embeds?.length ?? 0) > 0;
-    case 'file':
-      return (m.attachments?.size ?? 0) > 0;
-    case 'image': {
-      if ((m.attachments?.size ?? 0) > 0 && m.attachments?.values !== undefined) {
-        for (const a of m.attachments.values()) {
-          if (typeof a.contentType === 'string' && a.contentType.startsWith('image/')) return true;
-        }
-      }
-      return (m.embeds ?? []).some((e) => {
-        const embed = e as { image?: unknown, thumbnail?: unknown };
-        return embed.image !== undefined || embed.thumbnail !== undefined;
-      });
-    }
-    case 'sticker':
-      return (m.stickers?.size ?? 0) > 0;
-    case 'poll':
-      return m.poll !== undefined && m.poll !== null;
-    case 'reaction':
-      return (m.reactions?.cache?.size ?? 0) > 0;
-    default:
-      return false;
-  }
-};
-
-/** 1 件がクエリに当てはまるか */
-export const matchesQuery = (m: SearchableMessage, q: SearchQuery): boolean => {
-  const content = (m.content ?? '').toLowerCase();
-  const at = m.createdTimestamp;
-  if (q.before !== undefined && at >= q.before) return false;
-  if (q.after !== undefined && at < q.after) return false;
-  if (q.pinned === true && m.pinned !== true) return false;
-  if (q.minLength !== undefined && (m.content ?? '').length < q.minLength) return false;
-  if (q.maxLength !== undefined && (m.content ?? '').length > q.maxLength) return false;
-  if (q.regex !== undefined && !q.regex.test(m.content ?? '')) return false;
-
-  // from: は ID・ユーザー名・表示名のどれでも当たる (Discord の検索と同じ)
-  if (q.from.length > 0) {
-    const names = authorNames(m);
-    if (!q.from.some(f => names.some(n => n === f || n.includes(f)))) return false;
-  }
-  if (q.mentions.length > 0) {
-    const users = m.mentions?.users;
-    if (users === undefined) return false;
-    if (!q.mentions.some(id => users.has(id))) return false;
-  }
-  for (const type of q.has) {
-    if (!hasType(m, type)) return false;
-  }
-  for (const term of q.terms) if (!content.includes(term)) return false;
-  for (const phrase of q.phrases) if (!content.includes(phrase)) return false;
-  for (const term of q.notTerms) if (content.includes(term)) return false;
-  if (q.anyOf.length > 0 && !q.anyOf.some(term => content.includes(term))) return false;
-  return true;
 };
 
 /** 何を条件にしたかを 1 行にする (ツールの結果に添えてモデルに返す) */
