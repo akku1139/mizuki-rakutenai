@@ -158,7 +158,7 @@ const textChannelsOf = (guild: any, blacklist: readonly string[]): SearchTarget[
   for (const ch of guild.channels?.cache?.values?.() ?? []) {
     if (typeof ch?.isTextBased === 'function' && !ch.isTextBased()) continue;
     if (blocked(ch.id, ch.parentId)) continue;
-    out.push({ id: ch.id, name: ch.name ?? ch.id, messages: ch.messages });
+    out.push({ id: ch.id, name: `#${ch.name ?? ch.id}`, messages: ch.messages });
   }
   for (const t of guild.threads?.cache?.values?.() ?? []) {
     if (blocked(t.id, t.parentId)) continue;
@@ -414,7 +414,15 @@ const searchMessages: AITool = {
         missing = resolved.missing;
       }
       targets = targets.filter(t => !blacklist.includes(t.id));
-      if (targets.length === 0) return [false, { error: `対象のチャンネルが見つかりません: ${missing.join(', ') || 'なし'}` }];
+      if (targets.length === 0) {
+        const candidates = [...new Set(missing.flatMap(m => channeNameCandidates(msg.guild, m)))].slice(0, 8);
+        return [false, {
+          error: `対象のチャンネルが見つかりません: ${missing.join(', ') || 'なし'}`
+            + (candidates.length > 0 ? `。近い候補: ${candidates.join(', ')}` : '')
+            + '。#名前 / ID / URL のどれでも指定できます',
+          ...(candidates.length > 0 ? { candidates } : {}),
+        }];
+      }
 
       // まず公式の検索 API。使えないとき (権限不足・Fluxer・索引なし) だけ自前で遡る
       let collected: Array<{ message: any, target: SearchTarget }> = [];
@@ -464,11 +472,15 @@ const searchMessages: AITool = {
         via,
         ...(query.ignored.length > 0 ? { ignoredOperators: query.ignored } : {}),
         ...(missing.length > 0 ? { unknownChannels: missing } : {}),
-        channelsSearched: targets.map(t => t.name),
+        // 名前だけだと、モデルが次のツール呼び出しで困る (ID を必ず添える)
+        channels: targets.map(t => ({ id: t.id, name: t.name })),
         ...(via === 'paging' ? { scanned } : {}),
         count: messages.length,
         ...(messages.length === 0
           ? { hint: '条件を緩めるか、期間 (after:) を広げてください。サーバー全体を見るには channels: "all"' }
+          : {}),
+        ...(messages.length > 0
+          ? { next: 'このチャンネルの前後のやり取りは fetch_messages_history に channel (上の channels[].id) かメッセージの url を渡すと読める' }
           : {}),
         messages,
       }];
@@ -478,14 +490,93 @@ const searchMessages: AITool = {
   },
 };
 
+/** チャンネル名の候補 (曖昧一致のエラーに添える) */
+const channeNameCandidates = (guild: any, wanted: string, limit = 5): string[] => {
+  const needle = wanted.toLowerCase().replace(/^#/, '').trim();
+  const names: string[] = [];
+  for (const ch of guild?.channels?.cache?.values?.() ?? []) names.push(String(ch.name ?? ''));
+  for (const t of guild?.threads?.cache?.values?.() ?? []) names.push(String(t.name ?? ''));
+  const scored = names
+    .map(name => {
+      const lower = name.toLowerCase();
+      let score = 0;
+      if (lower === needle) score = 5;
+      else if (lower.startsWith(needle) || needle.startsWith(lower)) score = 4;
+      else if (lower.includes(needle) || needle.includes(lower)) score = 3;
+      else {
+        // 1 文字違い (taken-gen → taken-general) を拾う
+        let common = 0;
+        for (let i = 0; i < Math.min(lower.length, needle.length) && lower[i] === needle[i]; i++) common++;
+        score = common >= 3 ? 1 : 0;
+      }
+      return { name, score };
+    })
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return [...new Set(scored.map(x => `#${x.name}`))].slice(0, limit);
+};
+
+/**
+ * チャンネルの指定を解決する。`<#id>` / ID / URL / `#名前` / 名前 (曖昧一致) のどれでも受ける。
+ *
+ * モデルはチャンネル名しか持っていないことが多いので、名前でも引けるようにしてある。
+ * 見つからないときは候補を返す (「パースに失敗しました」だけだと何を直せばいいか分からない)。
+ */
+const resolveChannelArg = async (
+  msg: OmitPartialGroupDMChannel<Message<boolean>>,
+  value: string,
+): Promise<{ channel?: HistoryChannel, error?: { error: string, candidates?: string[] } }> => {
+  const raw = String(value ?? '').trim();
+  const mention = /<#(\d+)>/.exec(raw);
+  const parsed = parseMessageUrl(raw);
+  const id = mention?.[1] ?? parsed?.channelId ?? (/^\d+$/.test(raw) ? raw : undefined);
+
+  if (id !== undefined) {
+    // URL のホストから引くクライアントを選ぶが、駄目なら目の前のクライアントでも試す
+    const clients = [clientForUrl(raw, msg.client as Client<boolean>), msg.client as Client<boolean>];
+    for (const client of [...new Set(clients)]) {
+      try {
+        const fetched = await client.channels.fetch(id);
+        if (fetched !== null && fetched?.isTextBased()) return { channel: fetched as unknown as HistoryChannel };
+      } catch { /* 次のクライアントで試す */ }
+    }
+    return { error: { error: `チャンネル ${id} を取得できませんでした` } };
+  }
+
+  const wanted = raw.replace(/^#/, '').trim().toLowerCase();
+  if (wanted === '') return { error: { error: 'チャンネル名が空です' } };
+  const guild = msg.guild;
+  if (guild === null) return { error: { error: 'サーバー外ではチャンネル名で指定できません (URL か ID を使ってください)' } };
+
+  const pools: any[] = [...guild.channels.cache.values(), ...((guild as any).threads?.cache?.values?.() ?? [])]
+    .filter((c: any) => typeof c?.isTextBased === 'function' && c.isTextBased());
+  const byName = (test: (name: string) => boolean) => pools.find((c: any) => test(String(c.name ?? '').toLowerCase()));
+  const channel = byName(n => n === wanted)
+    ?? byName(n => n.replace(/[-_ ]/g, '') === wanted.replace(/[-_ ]/g, ''))
+    ?? byName(n => n.startsWith(wanted))
+    ?? byName(n => n.includes(wanted));
+  if (channel !== undefined) return { channel: channel as HistoryChannel };
+
+  const candidates = channeNameCandidates(guild, wanted);
+  return {
+    error: {
+      error: `チャンネル「${raw}」が見つかりません。#名前・ID・URL のどれでも指定できます`
+        + (candidates.length > 0 ? `。近い候補: ${candidates.join(', ')}` : ''),
+      ...(candidates.length > 0 ? { candidates } : {}),
+    },
+  };
+};
+
 /// fetch_messages_history: 特定メッセージ周辺の履歴を取得
 
 const fetchMessagesHistory: AITool = {
-  description: 'Discordのチャンネル履歴を取得します。anchor 未指定ならチャンネルの最新メッセージを起点にします。channel 未指定で anchor が別チャンネルのメッセージを指す場合は、そのチャンネルを解決します。',
+  description: 'Discordのチャンネル履歴を取得します。anchor 未指定ならチャンネルの最新メッセージを起点にします。'
+    + 'channel は URL・<#id>・ID・#名前・名前 のどれでも指定できます (名前は曖昧一致)。'
+    + 'channel 未指定で anchor が別チャンネルのメッセージを指す場合は、そのチャンネルを解決します。',
   parametersJsonSchema: {
     type: 'object',
     properties: {
-      channel: { type: 'string', description: 'チャンネルURLまたは <#id>。未指定なら anchor または現在のチャンネル' },
+      channel: { type: 'string', description: 'チャンネルの指定。URL・<#id>・ID・#名前・名前 (曖昧一致) のどれでもよい。未指定なら anchor または現在のチャンネル' },
       anchor: { type: 'string', description: '起点メッセージのURLまたはID。未指定ならチャンネルの最新メッセージ' },
       direction: {
         type: 'string',
@@ -501,20 +592,9 @@ const fetchMessagesHistory: AITool = {
       const channelExplicit = channelArg !== undefined && channelArg !== '';
 
       if (channelExplicit) {
-        const mention = /<#(\d+)>/.exec(String(channelArg));
-        const parsed = parseMessageUrl(String(channelArg));
-        if (mention?.[1]) {
-          const fetched = await msg.client.channels.fetch(mention[1]);
-          if (!fetched?.isTextBased()) return [false, { error: 'チャンネルを取得できませんでした' }];
-          ch = fetched as unknown as HistoryChannel;
-        } else if (parsed?.channelId) {
-          const client = clientForUrl(String(channelArg), msg.client as Client<boolean>);
-          const fetched = await client.channels.fetch(parsed.channelId);
-          if (!fetched?.isTextBased()) return [false, { error: 'チャンネルを取得できませんでした' }];
-          ch = fetched as unknown as HistoryChannel;
-        } else {
-          return [false, { error: 'チャンネルのパースに失敗しました' }];
-        }
+        const resolved = await resolveChannelArg(msg, String(channelArg));
+        if (resolved.error !== undefined) return [false, resolved.error];
+        ch = resolved.channel!;
       }
 
       const dir = direction === 'after' || direction === 'around' ? direction : 'before';

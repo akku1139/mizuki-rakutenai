@@ -284,7 +284,7 @@ API が 400 を返してそのセッションは捨てられます** (小さい�
 | ツール | 内容 | 有効になる条件 |
 |---|---|---|
 | `fetch_message` | Discord / Fluxer のメッセージ URL から1件取得 | 常に |
-| `fetch_messages_history` | メッセージ URL かチャンネルメンションを起点に、前後の履歴を取得 (既定30件、最大100件、`after` / `before` / `around`) | 常に |
+| `fetch_messages_history` | メッセージ URL かチャンネルメンションを起点に、前後の履歴を取得 (既定30件、最大100件、`after` / `before` / `around`)。`channel` は URL / `<#id>` / ID / `#名前` / 名前 (曖昧一致) のどれでもよい | 常に |
 | `search_messages` | サーバー内のメッセージ検索。Discord の検索構文を受け付ける (下記) | 常に |
 | `wikipedia_search` | 日本語版 Wikipedia を検索 | 常に |
 | `wikipedia_read` | 日本語版 Wikipedia の記事本文を取得 | 常に |

@@ -225,3 +225,66 @@ test('索引がまだ無い (202) と言われたら 1 回だけ待ってやり�
   assert.equal(calls, 2);
   assert.equal((result[1] as { count: number }).count, 1);
 });
+
+test('検索結果はチャンネルの ID と名前を返し、次に使える形にする', async () => {
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const { client } = fakeClient(() => ({ total_results: 1, messages: [[apiMessage('20', 'デプロイ 失敗')]] }));
+  const result = await executeAITool('search_messages', { query: 'デプロイ' }, meta(client, channel));
+  assert.equal(result[0], true);
+  const value = result[1] as {
+    channels: Array<{ id: string, name: string }>,
+    messages: Array<{ channelId: string, url: string }>,
+    next?: string,
+  };
+  // 名前だけだと次のツール呼び出しで困るので、ID を必ず返す
+  assert.deepEqual(value.channels, [{ id: '2', name: '#general' }]);
+  assert.equal(value.messages[0]!.channelId, '2');
+  assert.match(String(value.next), /fetch_messages_history/);
+});
+
+test('fetch_messages_history はチャンネル名でも引ける (曖昧一致・候補つき)', async () => {
+  // fetch_messages_history は createdAt / messageSnapshots / author.bot も読む
+  const fullMessage = {
+    ...fakeMessage('5', 'ok'),
+    createdAt: new Date('2026-10-20T00:00:00Z'),
+    messageSnapshots: new Map(),
+    author: { id: 'u1', username: 'tako', globalName: null, displayName: 'たこ', bot: false },
+  };
+  const takenGeneral = { id: '9', name: 'taken-general', isTextBased: () => true, messages: { fetch: async () => new Map([['5', fullMessage]]) } };
+  const guild = {
+    id: '1',
+    channels: { cache: new Map([['9', takenGeneral]]) },
+    threads: { cache: new Map() },
+  };
+  const fetched: unknown[] = [];
+  const client = { channels: { fetch: async (id: string) => (id === '9' ? takenGeneral : null) } };
+  const m = {
+    msg: {
+      id: '100',
+      channelId: '2',
+      guild,
+      channel: { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } },
+      client,
+    },
+  } as unknown as Parameters<typeof executeAITool>[2];
+
+  // 名前 (曖昧一致) で引ける
+  const ok = await executeAITool('fetch_messages_history', { channel: 'taken', limit: 5 }, m);
+  assert.equal(ok[0], true, JSON.stringify(ok));
+  // #付き・ID・URL でも同じ
+  for (const value of ['#taken-general', '9', '<#9>', 'https://discord.com/channels/1/9/5']) {
+    const result = await executeAITool('fetch_messages_history', { channel: value, limit: 5 }, m);
+    assert.equal(result[0], true, `${value}: ${JSON.stringify(result)}`);
+  }
+
+  // 曖昧一致 (taken-gen → taken-general) も通る
+  const fuzzy = await executeAITool('fetch_messages_history', { channel: 'taken-gen', limit: 5 }, m);
+  assert.equal(fuzzy[0], true, JSON.stringify(fuzzy));
+
+  // 打ち間違いは、候補つきのエラーで返す (次の呼び出しを直せるように)
+  const missing = await executeAITool('fetch_messages_history', { channel: 'taken-generl', limit: 5 }, m);
+  assert.equal(missing[0], false);
+  const error = missing[1] as { error: string, candidates?: string[] };
+  assert.match(error.error, /#taken-general/);
+  assert.deepEqual(error.candidates, ['#taken-general']);
+});
