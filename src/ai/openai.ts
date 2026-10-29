@@ -12,7 +12,7 @@ import {
   safeCutPoint, stripAnalysis, summaryMessage, type History,
 } from './compact.ts';
 import { contextLengthFor, fetchModelListCached } from './model-meta.ts';
-import { fetchWithRateLimitRetry } from './ratelimit.ts';
+import { fetchWithRetry } from './ratelimit.ts';
 
 export interface OpenAICompatConfig {
   /** 例: https://api.openai.com/v1 (末尾に / を付けない) */
@@ -145,10 +145,10 @@ export class OpenAICompatChat implements ChatSession {
     this.#client = new OpenAI({
       baseURL: config.baseUrl,
       apiKey: config.apiKey,
-      // 429 の再試行は ratelimit.ts の設定 (待ち時間・回数・諦める条件) に一本化する。
+      // 再試行 (429 と上流の一時障害) は ratelimit.ts に一本化する。
       // SDK 側にも再試行があるので、二重に再送しないよう向こうは止める。
       maxRetries: 0,
-      fetch: (url, init) => fetchWithRateLimitRetry(() => fetch(url, init)),
+      fetch: (url, init) => fetchWithRetry(() => fetch(url, init)),
       defaultHeaders: {
         'HTTP-Referer': 'https://github.com/akku1139/mizuki-rakutenai',
         'X-OpenRouter-Title': 'mizuki-rakutenai',
@@ -484,15 +484,57 @@ export class OpenAICompatChat implements ChatSession {
     return response.choices?.[0]?.message?.content ?? '';
   }
 
+  /**
+   * 送信するメッセージを、どのゲートウェイでもプロンプトに変換できる形に均す。
+   *
+   * - 中身が空でツール呼び出しも無い assistant は捨てる (情報が無く、変換できない実装がある)
+   * - `content: null` の assistant は content ごと省く (「ツール呼び出しのときだけ null」を
+   *   受け付けないプロバイダがあり、400 "could not be rendered into a prompt" になる)
+   * - 対応する assistant が無い tool メッセージは捨てる (対応が切れていると 400)
+   */
+  #sanitize(messages: OpenAI.Chat.ChatCompletionMessageParam[]): OpenAI.Chat.ChatCompletionMessageParam[] {
+    const out: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+    for (const m of messages) {
+      if (m.role === 'tool') {
+        const answered = out.some(prev => prev.role === 'assistant'
+          && ((prev as { tool_calls?: Array<{ id: string }> }).tool_calls ?? []).some(c => c.id === (m as { tool_call_id?: string }).tool_call_id));
+        if (!answered) continue;
+        out.push(m);
+        continue;
+      }
+      if (m.role === 'assistant') {
+        const calls = (m as { tool_calls?: unknown[] }).tool_calls ?? [];
+        const hasContent = typeof m.content === 'string' ? m.content.trim() !== '' : Array.isArray(m.content);
+        if (!hasContent && calls.length === 0) continue;
+        if (m.content === null) {
+          const { content: _content, ...rest } = m as unknown as Record<string, unknown>;
+          out.push(rest as unknown as OpenAI.Chat.ChatCompletionMessageParam);
+          continue;
+        }
+      }
+      out.push(m);
+    }
+    return out;
+  }
+
+  /** 400 のときに何を送ったかを残す (再現の手がかり) */
+  #requestShape(messages: OpenAI.Chat.ChatCompletionMessageParam[]): string {
+    return messages.map(m => {
+      const calls = (m as { tool_calls?: unknown[] }).tool_calls?.length ?? 0;
+      const content = typeof m.content === 'string' ? m.content.length : Array.isArray(m.content) ? `parts:${m.content.length}` : 'null';
+      return `${m.role}/${content}${calls > 0 ? `/calls:${calls}` : ''}`;
+    }).join(' ');
+  }
+
   /** 1回分の chat/completions をストリーミング実行し、必要ならツールを実行する */
   async *#complete(meta: unknown): AsyncGenerator<AIEvent> {
     // ツールを大量に呼ぶターンは 1 回で窓を食い潰すので、毎リクエストの前に見る
     await this.#maybeCompact();
 
-    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = this.#sanitize([
       ...(this.#systemPrompt ? [{ role: 'system' as const, content: this.#systemPrompt }] : []),
       ...this.#history.map(m => this.#withReasoning(m)),
-    ];
+    ]);
 
     let stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk> | undefined;
     try {
@@ -508,6 +550,7 @@ export class OpenAICompatChat implements ChatSession {
       this.#history = this.#historyBeforeTurn;
       const message = err instanceof Error ? err.message : String(err);
       const status = (err as APIError)?.status ?? '-';
+      if (Number(status) === 400) log('openai: 400 のリクエスト形:', this.#requestShape(messages));
       yield {
         type: 'error',
         code: String(status),

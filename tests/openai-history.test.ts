@@ -39,7 +39,7 @@ test('an empty reply after a tool call keeps the tool exchange', async t => {
   // ツールを実行したターンは残す (消すと次のリクエストで「何を調べたか」を失う)
   assert.deepEqual(bodies[2]?.messages.slice(0, 3), [
     { role: 'user', content: 'first' },
-    { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{}' } }] },
+    { role: 'assistant', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{}' } }] },
     { role: 'tool', content: '{"result":"found"}', tool_call_id: 'call_1' },
   ]);
   assert.deepEqual(bodies[2]?.messages.at(-1), { role: 'user', content: 'second' });

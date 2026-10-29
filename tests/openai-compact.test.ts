@@ -93,7 +93,7 @@ test('要約に失敗したら古い方を捨てて、リクエストは通す',
     const body = JSON.parse(String(init.body)) as Body;
     bodies.push(body);
     calls++;
-    if (body.stream === false) return new Response('boom', { status: 500 });
+    if (body.stream === false) return new Response('boom', { status: 400 });
     return stream('ok');
   });
   const chat = new OpenAICompatChat({ baseUrl: 'https://llm.invalid/v1', apiKey: 'k', model: 'm', contextWindowTokens: 1_000 });
@@ -120,7 +120,7 @@ test('要約が続けて失敗しても、捨ててでも予算に収める', as
     if (target.endsWith('/models')) return new Response('nope', { status: 404 });
     const body = JSON.parse(String(init!.body)) as Body;
     bodies.push(body);
-    if (body.stream === false) return new Response('boom', { status: 500 }); // 要約は常に失敗
+    if (body.stream === false) return new Response('boom', { status: 400 }); // 要約は常に失敗
     if (body.messages.at(-1)!.role === 'tool') rounds++;
     if (rounds >= 12) return stream('done');
     return new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `c${rounds}`, function: { name: 'custom_tool', arguments: '{}' } }] } }] })}\n\ndata: [DONE]\n\n`);
@@ -335,7 +335,7 @@ test('要約できないときは、古い方から全体の 1/3 を捨てる (�
     if (target.endsWith('/models')) return new Response('nope', { status: 404 });
     const body = JSON.parse(String(init!.body)) as Body;
     requests.push(body);
-    if (body.stream === false) return new Response('boom', { status: 500 }); // 要約は必ず失敗
+    if (body.stream === false) return new Response('boom', { status: 400 }); // 要約は必ず失敗
     return stream('ok');
   });
   const chat = new OpenAICompatChat({ baseUrl: 'https://llm.invalid/v1', apiKey: 'k', model: 'm', contextWindowTokens: 10_000 });

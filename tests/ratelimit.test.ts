@@ -44,7 +44,8 @@ test('server cooldown takes priority; long delays and quota errors are not retri
     Response.json({ error: { code: 'insufficient_quota' } }, { status: 429 }),
     Response.json({ error: { type: 'billing_hard_limit_reached' } }, { status: 429 }),
     new Response('unauthorized', { status: 401 }),
-    new Response('unavailable', { status: 503 }),
+    new Response('missing', { status: 404 }),
+    new Response('bad request', { status: 400 }),
   ]) {
     let requests = 0;
     const result = await fetchWithRateLimitRetry(async () => { requests++; return response; });
@@ -54,13 +55,76 @@ test('server cooldown takes priority; long delays and quota errors are not retri
   }
 });
 
-test('network failures are not retried', async () => {
+test('上流が落ちている (5xx・接続断) ときは短い間隔で再試行する', async () => {
+  const waits: number[] = [];
   let calls = 0;
-  await assert.rejects(fetchWithRateLimitRetry(async () => {
+  const response = await fetchWithRateLimitRetry(async () => {
     calls++;
+    return calls < 3 ? new Response('down', { status: 503 }) : new Response('ok');
+  }, { sleep: async ms => { waits.push(ms); }, random: () => 0 });
+  assert.equal(response.status, 200);
+  assert.equal(calls, 3);
+  assert.deepEqual(waits, [250, 500], '429 より短い間隔で待つ');
+
+  // 接続断も同じ扱い
+  let attempts = 0;
+  const recovered = await fetchWithRateLimitRetry(async () => {
+    attempts++;
+    if (attempts < 2) throw new Error('network');
+    return new Response('ok');
+  }, { sleep: async () => {}, random: () => 0 });
+  assert.equal(recovered.status, 200);
+  assert.equal(attempts, 2);
+});
+
+test('上流が落ちたままなら諦める (回数は 429 と同じ)', async () => {
+  let calls = 0;
+  const response = await fetchWithRateLimitRetry(async () => {
+    calls++;
+    return new Response('down', { status: 500 });
+  }, { sleep: async () => {}, random: () => 0 });
+  assert.equal(calls, 4);
+  assert.equal(response.status, 500);
+  assert.equal(await response.text(), 'down');
+
+  // 接続断が続くときは最後の例外を投げる
+  let attempts = 0;
+  await assert.rejects(fetchWithRateLimitRetry(async () => {
+    attempts++;
     throw new Error('network');
-  }), /network/);
-  assert.equal(calls, 1);
+  }, { sleep: async () => {}, random: () => 0 }), /network/);
+  assert.equal(attempts, 4);
+});
+
+test('ゲートウェイの描画失敗 (400) は 1 回だけ再試行する', async () => {
+  const renderError = () => new Response(JSON.stringify({ error: { message: 'The request could not be rendered into a prompt for this model.' } }), { status: 400 });
+  let calls = 0;
+  const waits: number[] = [];
+  const recovered = await fetchWithRateLimitRetry(async () => {
+    calls++;
+    return calls === 1 ? renderError() : new Response('ok');
+  }, { sleep: async ms => { waits.push(ms); }, random: () => 0 });
+  assert.equal(recovered.status, 200);
+  assert.equal(calls, 2);
+  assert.deepEqual(waits, [250]);
+
+  // 2 回続いたら諦める (同じ本文を何度も送らない)
+  let attempts = 0;
+  const stillBroken = await fetchWithRateLimitRetry(async () => {
+    attempts++;
+    return renderError();
+  }, { sleep: async () => {}, random: () => 0 });
+  assert.equal(attempts, 2);
+  assert.equal(stillBroken.status, 400);
+
+  // 描画失敗以外の 400 は再試行しない
+  let plain = 0;
+  const bad = await fetchWithRateLimitRetry(async () => {
+    plain++;
+    return new Response(JSON.stringify({ error: { message: 'invalid parameter' } }), { status: 400 });
+  }, { sleep: async () => {}, random: () => 0 });
+  assert.equal(plain, 1);
+  assert.equal(bad.status, 400);
 });
 
 test('a successful response with a broken stream is not replayed', async () => {

@@ -78,7 +78,8 @@ docs/             機能ごとの仕様 (ai.md が AI の一次資料)
 - **429 の再試行は `src/ai/ratelimit.ts` に一本化**しています。SDK 側の再試行は
   `maxRetries: 0` で止め、`fetch` に `fetchWithRateLimitRetry` を差し込んでいます。
   SDK の既定 (2回・独自バックオフ) に戻すと、docs に書いた方針 (最大3回、`Retry-After` 尊重、
-  60秒超は諦める、quota は再送しない) が効かなくなります。`tests/ratelimit.test.ts` がこれを見ています。
+  60秒超は諦める、quota は再送しない、5xx・接続断は短い待ちで再試行、描画失敗の 400 は1回だけ)
+  が効かなくなります。`tests/ratelimit.test.ts` がこれを見ています。
 - **reasoning** は OpenAI 公式のスキーマに無いフィールドです。`reasoning_content` (DeepSeek 系) と
   `reasoning` (OpenRouter) の両方を読み、`reasoning-start` → `reasoning-delta` として流します。
   返信本文には入れませんが、プロバイダが要求する場合は会話履歴の assistant メッセージに

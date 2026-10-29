@@ -62,14 +62,14 @@ test('ツール呼び出しはイベントとして残る', async t => {
 
 test('API エラーは status=error とメッセージになる', async t => {
   t.mock.method(globalThis, 'fetch', async (url: string) => {
-    if (String(url).endsWith('/chat/completions')) return new Response('boom', { status: 500 });
+    if (String(url).endsWith('/chat/completions')) return new Response('boom', { status: 400 });
     return new Response('{}', { headers: { 'content-type': 'application/json' } });
   });
   const job = enqueueJob({ type: 'agent', prompt: 'q', provider: 'openai' });
   await whenIdle();
   const failed = getJob(job.id)!;
   assert.equal(failed.status, 'error');
-  assert.match(String(failed.error), /500/);
+  assert.match(String(failed.error), /400/);
 });
 
 test('指示もチャンネルも無いジョブはエラーになる', async () => {

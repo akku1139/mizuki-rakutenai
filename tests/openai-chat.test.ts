@@ -122,9 +122,9 @@ test('reasoning on a tool-call round is shown but never replayed into the histor
     { type: 'reasoning-delta', text: 'thinking' },
   ]);
   // reasoning は返信本文には混ざらないが、会話履歴にはプロバイダ要求に応じて再送する
-  assert.equal(requests[1]!.body.messages[1]!.content, null);
+  assert.equal(requests[1]!.body.messages[1]!.content, undefined, 'content: null は送らない');
   assert.deepEqual(requests[1]!.body.messages.slice(1), [
-    { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{}' } }], reasoning_content: 'ツールを使う' },
+    { role: 'assistant', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{}' } }], reasoning_content: 'ツールを使う' },
     { role: 'tool', content: '{"found":42}', tool_call_id: 'call_1' },
   ]);
   assert.ok(!events.some(e => e.type === 'text-delta' && /ツールを使う|thinking/.test(e.text)));
@@ -144,15 +144,16 @@ test('the reply is kept in the history for the next turn', async t => {
 });
 
 test('an HTTP error yields an error event and leaves the history as it was', async t => {
-  let status = 500;
-  const requests = mockFetch(t, () => status === 500 ? new Response('boom', { status }) : stream(delta({ content: 'ok' }), done));
+  // 400 は再試行しない (5xx は上流の一時障害として再試行するので、ここでは使わない)
+  let status = 400;
+  const requests = mockFetch(t, () => status === 400 ? new Response('boom', { status }) : stream(delta({ content: 'ok' }), done));
   const chat = new OpenAICompatChat(config);
   const events = await say(chat, 'fails');
   assert.equal(events.length, 1);
   assert.equal(events[0]!.type, 'error');
-  assert.match((events[0] as { message: string }).message, /500 boom/);
+  assert.match((events[0] as { message: string }).message, /400 boom/);
 
-  // サーバーエラーは SDK に再送させない (再試行は 429 のときだけ、ratelimit.ts の設定に従う)
+  // 恒久的な失敗 (400) は再試行しない (5xx は ratelimit.ts が再試行する)
   assert.equal(requests.length, 1);
 
   status = 200;
@@ -214,7 +215,7 @@ test('a tool call is assembled from pieces, run without $explain, and answered b
 
   assert.deepEqual(requests[0]!.body.tools, tools.definitions);
   assert.deepEqual(requests[1]!.body.messages.slice(1), [
-    { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{"q":"x","$explain":"searching"}' } }] },
+    { role: 'assistant', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{"q":"x","$explain":"searching"}' } }] },
     { role: 'tool', content: '{"found":42}', tool_call_id: 'call_1' },
   ]);
 });
