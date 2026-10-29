@@ -336,6 +336,7 @@ const searchMessages: AITool = {
       channels: { type: 'string', description: '対象チャンネル (#名前 / ID / URL をカンマ区切り)。"all" でサーバー全体。省略時は現在のチャンネル' },
       limit: { type: 'number', description: '返す最大件数 (既定 20, 最大 50)' },
     },
+    required: ['query'],
   },
   async execute({ query: rawQuery, channels, limit }, { msg }) {
     try {
@@ -382,14 +383,17 @@ const searchMessages: AITool = {
 
       // API に渡せる条件。content は語 + フレーズ + 除外語
       const words = [...query.terms, ...query.phrases.map(p => `"${p}"`), ...query.notTerms.map(t => `-${t}`)].join(' ').trim();
-      const hasRestriction = words !== '' || query.from.length > 0 || query.mentions.length > 0
+      const hasRestriction = words !== '' || query.anyOf.length > 0 || query.from.length > 0 || query.mentions.length > 0
         || query.has.length > 0 || query.pinned === true || query.after !== undefined || query.before !== undefined;
 
-      if (!hasRestriction && unsupported.length > 0) {
+      if (!hasRestriction) {
         return [false, {
-          error: `この条件は Discord の検索 API では使えません: ${unsupported.join(', ')}`,
-          hint: '語・from:・in:・mentions:・has:・before:/after:・is:pinned で指定してください。'
-            + 'regex と len は API が解釈しません。',
+          error: unsupported.length > 0
+            ? `この条件は Discord の検索 API では使えません: ${unsupported.join(', ')}`
+            : '検索条件がありません。query に語か条件を指定してください',
+          hint: '語・from:・in:・mentions:・has:・before:/after:・is:pinned で指定してください'
+            + ' (regex と len は API が解釈しません)。'
+            + '条件を付けずに直近のメッセージを読みたいだけなら fetch_messages_history を使ってください。',
         }];
       }
 
@@ -397,6 +401,16 @@ const searchMessages: AITool = {
       const contents = query.anyOf.length > 0
         ? query.anyOf.map(alt => (words === '' ? alt : `${words} ${alt}`))
         : [words === '' ? undefined : words];
+      // 語が無く、条件も has: / from: / 期間だけ… という場合は API の条件だけで絞れる。
+      // それすら無い (in: だけ) なら「そのチャンネルの最新」が返るだけなので検索として扱わない
+      const hasApiFilter = query.from.length > 0 || query.mentions.length > 0 || query.has.length > 0
+        || query.pinned === true || query.after !== undefined || query.before !== undefined;
+      if (words === '' && query.anyOf.length === 0 && !hasApiFilter) {
+        return [false, {
+          error: '検索語がありません',
+          hint: 'query に語を入れてください。直近のメッセージを読みたいだけなら fetch_messages_history を使ってください。',
+        }];
+      }
 
       let collected: Array<{ message: any, target: SearchTarget }> = [];
       const seen = new Set<string>();
@@ -447,6 +461,9 @@ const searchMessages: AITool = {
         ...(missing.length > 0 ? { unknownChannels: missing } : {}),
         // 名前だけだと、モデルが次のツール呼び出しで困る (ID を必ず添える)
         channels: targets.map(t => ({ id: t.id, name: t.name })),
+        ...(requested.length === 0
+          ? { scope: '現在のチャンネルだけを検索しました。他のチャンネルは channels か in: で指定してください' }
+          : {}),
         count: messages.length,
         ...(messages.length === 0
           ? { hint: '条件を緩めるか、期間 (after:) を広げてください。サーバー全体を見るには channels: "all"' }

@@ -305,3 +305,31 @@ test('読めないチャンネルは権限のエラーで返す (50001 をその
   assert.match(error.error, /権限がありません/);
   assert.match(error.hint, /URL/);
 });
+
+test('検索語が無いときは API を叩かずエラーにする (最新の羅列を返さない)', async () => {
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  let calls = 0;
+  const { client } = fakeClient(() => { calls++; return { total_results: 0, messages: [] }; });
+  for (const args of [{}, { query: '' }, { query: '   ' }] as Array<Record<string, unknown>>) {
+    const result = await executeAITool('search_messages', args, meta(client, channel));
+    assert.equal(result[0], false, JSON.stringify(args));
+    assert.match(String((result[1] as { error: string }).error), /検索条件がありません|検索語がありません/);
+  }
+  assert.equal(calls, 0, '条件が無いのに API を叩いている');
+});
+
+test('条件だけのクエリは API に渡す (has: だけでも検索できる)', async () => {
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const { calls, client } = fakeClient(() => ({ total_results: 1, messages: [[apiMessage('20', '')]] }));
+  const result = await executeAITool('search_messages', { query: 'has:image' }, meta(client, channel));
+  assert.equal(result[0], true);
+  assert.equal(calls[0]!.query.get('content'), null, '語は送らない');
+  assert.equal(calls[0]!.query.get('has'), 'image');
+});
+
+test('チャンネルを指定しないときは、そのことを結果に書く', async () => {
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const { client } = fakeClient(() => ({ total_results: 1, messages: [[apiMessage('20', 'techfish')]], }));
+  const result = await executeAITool('search_messages', { query: 'techfish' }, meta(client, channel));
+  assert.match(String((result[1] as { scope?: string }).scope), /現在のチャンネルだけ/);
+});
