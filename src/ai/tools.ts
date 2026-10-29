@@ -213,6 +213,7 @@ const searchViaApi = async (
   query: SearchQuery,
   channelIds: string[],
   limit: number,
+  startOffset = 0,
 ): Promise<OfficialSearchResult> => {
   const client = msg.client;
   const guild = msg.guild!;
@@ -256,7 +257,7 @@ const searchViaApi = async (
 
   const collected: any[] = [];
   let total = 0;
-  let offset = 0;
+  let offset = Math.max(0, Math.min(Math.trunc(startOffset), 9_975));
   let retried = false;
   while (collected.length < limit && offset <= 9_975) {
     const page = await client.rest.get(`/guilds/${guild.id}/messages/search`, {
@@ -328,17 +329,19 @@ const searchMessages: AITool = {
     + '使える条件: from: (ユーザー名/ID) in: (#チャンネル名/ID/URL) mentions: (ユーザーID) has: (link/embed/image/file/sticker/poll/reaction) '
     + 'before: after: during: (2026-10-01 / 2026-10 / 7d / 24h) is:pinned len:>100 len:<50 regex:/…/i sort:old。'
     + '`OR` でどちらか、先頭に - で除外、"" でフレーズ。既定は現在のチャンネルだけを新しい順に見る。'
-    + 'サーバー全体を見るときは channels: "all"。',
+    + 'サーバー全体を見るときは channels: "all"。'
+    + '件数が多いときは total と nextOffset が返るので、続きは offset に nextOffset を渡して読む (limit は最大 100)。',
   parametersJsonSchema: {
     type: 'object',
     properties: {
       query: { type: 'string', description: '検索語と条件 (上記の書き方)' },
       channels: { type: 'string', description: '対象チャンネル (#名前 / ID / URL をカンマ区切り)。"all" でサーバー全体。省略時は現在のチャンネル' },
-      limit: { type: 'number', description: '返す最大件数 (既定 20, 最大 50)' },
+      limit: { type: 'number', description: '返す最大件数 (既定 20, 最大 100)' },
+      offset: { type: 'number', description: '読み飛ばす件数 (既定 0)。続きは nextOffset を渡す' },
     },
     required: ['query'],
   },
-  async execute({ query: rawQuery, channels, limit }, { msg }) {
+  async execute({ query: rawQuery, channels, limit, offset }, { msg }) {
     try {
       if (!msg.guild) return [false, { error: 'サーバー内でのみ使用できます' }];
       if (rawQuery !== undefined && typeof rawQuery !== 'string') {
@@ -349,7 +352,8 @@ const searchMessages: AITool = {
       }
       const query = parseSearchQuery(typeof rawQuery === 'string' ? rawQuery : '');
       const blacklist = config.blacklistedChannels ?? [];
-      const limits = typeof limit === 'number' ? Math.min(Math.max(Math.trunc(limit), 1), 50) : 20;
+      const limits = typeof limit === 'number' ? Math.min(Math.max(Math.trunc(limit), 1), 100) : 20;
+      const startOffset = typeof offset === 'number' ? Math.min(Math.max(Math.trunc(offset), 0), 9_975) : 0;
 
       const current: SearchTarget = {
         id: msg.channel.id,
@@ -419,10 +423,12 @@ const searchMessages: AITool = {
       }
 
       let collected: Array<{ message: any, target: SearchTarget }> = [];
+      let total = 0;
       const seen = new Set<string>();
       try {
         for (const content of contents) {
-          const result = await searchViaApi(msg, content, query, targets.map(t => t.id), limits);
+          const result = await searchViaApi(msg, content, query, targets.map(t => t.id), limits, startOffset);
+          total = Math.max(total, result.total);
           const byId = new Map(targets.map(t => [t.id, t]));
           for (const raw of result.messages) {
             if (seen.has(raw.id)) continue;
@@ -462,6 +468,9 @@ const searchMessages: AITool = {
 
       return [true, {
         query: describeQuery(query),
+        total,
+        offset: startOffset,
+        ...(startOffset + messages.length < total ? { nextOffset: startOffset + messages.length } : {}),
         // 実際に API に渡した条件 (モデルが「何を検索したか」を確認できるように)
         request: {
           content: contents.filter(c => c !== undefined).join(' OR ') || null,

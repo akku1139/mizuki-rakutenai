@@ -351,6 +351,17 @@ Discord の検索 API (`GET /guilds/{id}/messages/search`) だけを使います
 結果には `channels: [{ id, name }]` を返すので、続けて `fetch_messages_history` を呼ぶときにそのまま
 ID を渡せます。見つからないチャンネルは `近い候補: #…` を返します。
 
+**2 ページ目以降**も読めます。結果の `total` が総ヒット数、`nextOffset` が続きの位置です
+(`limit` は最大 100、API へは 25 件ずつ問い合わせます)。
+
+```json
+{ "query": "techfish", "limit": 25, "offset": 25 }
+→ { "total": 141, "offset": 25, "nextOffset": 50, ... }
+```
+
+`offset` は Discord の検索結果に対する生の位置です。`OR` と併用したときは、語ごとに検索して
+まとめる都合で件数がずれることがあります。
+
 ## MCP ツール
 
 `data/config.json` の `mcpServers` でつないだ MCP サーバーのツールを、モデルから使えるようにします

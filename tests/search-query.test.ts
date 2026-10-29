@@ -352,3 +352,39 @@ test('query が文字列でなければ断る (空扱いにしない)', async ()
   assert.match(String((result[1] as { error: string }).error), /文字列で指定/);
   assert.equal(calls, 0);
 });
+
+test('offset で 2 ページ目以降を読める (total と nextOffset を返す)', async () => {
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const offsets: string[] = [];
+  const { client } = fakeClient((_path, options) => {
+    const query = (options as { query: URLSearchParams }).query;
+    offsets.push(String(query.get('offset')));
+    return { total_results: 141, messages: [[apiMessage('20', 'techfish')]] };
+  });
+  const result = await executeAITool('search_messages', { query: 'techfish', offset: 50 }, meta(client, channel));
+  const value = result[1] as { total: number, offset: number, nextOffset?: number };
+  assert.deepEqual(offsets, ['50']);
+  assert.equal(value.total, 141);
+  assert.equal(value.offset, 50);
+  assert.equal(value.nextOffset, 51);
+});
+
+test('limit が 25 を超えたら 25 件ずつページングする', async () => {
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const calls: Array<{ limit: string | null, offset: string | null }> = [];
+  let id = 100;
+  const { client } = fakeClient((_path, options) => {
+    const query = (options as { query: URLSearchParams }).query;
+    calls.push({ limit: query.get('limit'), offset: query.get('offset') });
+    // 25 件ずつ返す (最後は 10 件)
+    const remaining = 60 - Number(query.get('offset'));
+    const size = Math.min(25, remaining);
+    const rows = Array.from({ length: size }, () => apiMessage(String(id++), 'techfish'));
+    return { total_results: 60, messages: [rows] };
+  });
+  const result = await executeAITool('search_messages', { query: 'techfish', limit: 60 }, meta(client, channel));
+  assert.equal(result[0], true);
+  assert.deepEqual(calls.map(c => c.limit), ['25', '25', '10']);
+  assert.deepEqual(calls.map(c => c.offset), ['0', '25', '50']);
+  assert.equal((result[1] as { count: number }).count, 60);
+});
