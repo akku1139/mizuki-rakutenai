@@ -1,1 +1,0 @@
-const x = `a\\nb`; // want: backslash-n in source? test
