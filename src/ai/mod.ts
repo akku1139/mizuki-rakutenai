@@ -206,7 +206,8 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         chatStore.delete(contextKey);          // 履歴はリセットして新モデルで開始
         await m.reply(`AI model switched to \`${p}\`. chat context was reset.`);
       } catch (e) {
-        await m.reply(`failed to switch: ${e}`);
+        error(m.id, ': failed to switch provider\n', e);
+        await m.reply(`failed to switch: 処理中にエラーが発生しました`);
       }
       return;
     }
