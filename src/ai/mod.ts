@@ -206,7 +206,8 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
         chatStore.delete(contextKey);          // 履歴はリセットして新モデルで開始
         await m.reply(`AI model switched to \`${p}\`. chat context was reset.`);
       } catch (e) {
-        await m.reply(`failed to switch: ${e}`);
+        error(m.id, ': failed to switch provider\n', e);
+        await m.reply(`failed to switch: 処理中にエラーが発生しました`);
       }
       return;
     }
@@ -377,7 +378,8 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
                 break;
 
               case 'error':
-                pending += `ERROR:\n\`\`\`json\n${JSON.stringify(gen, null, 2)}\n\`\`\`\n`;
+                error(m.id, ': AI error', gen);
+                pending += `ERROR: 処理中にエラーが発生しました\n`;
                 chatStore.delete(contextKey);
                 break;
 
@@ -405,7 +407,7 @@ const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
 
     } catch (e) {
       error(m.id, ': An error occurred during processing\n', e);
-      await m.reply(`ERROR:\n\`\`\`\n${e}\n\`\`\``);
+      await m.reply(`ERROR: 処理中にエラーが発生しました`);
     } finally {
       --aiProcessingJobs;
       resolveNext();
