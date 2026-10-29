@@ -55,6 +55,8 @@ export interface Recalled {
   text: string;
   /** 出した事実 (ツールの案内や、デバッグ用) */
   facts: MemoryFact[];
+  /** 保存されている事実の総数 */
+  total: number;
 }
 
 /**
@@ -81,7 +83,8 @@ export const recall = ({ memory, userId, text, maxChars = MEMORY_BLOCK_CHARS }: 
   const lines: string[] = [];
   const facts: MemoryFact[] = [];
   let used = 0;
-  const head = '覚えていること (Notion に保存した事実の抜粋。古い・食い違うときは本人に確認する):';
+  const head = `覚えていること (全 ${memory.facts.length} 件の抜粋。足りなければ memory ツールの search、`
+    + '詳しい記録は Notion を見る。古い・食い違うときは本人に確認する):';
   used += head.length + 1;
 
   const push = (fact: MemoryFact, label?: string): void => {
@@ -98,8 +101,8 @@ export const recall = ({ memory, userId, text, maxChars = MEMORY_BLOCK_CHARS }: 
   for (const fact of matched) push(fact);
   for (const fact of guild) push(fact);
 
-  if (lines.length === 0) return { text: '', facts: [] };
-  return { text: [head, ...lines].join('\n'), facts };
+  if (lines.length === 0) return { text: '', facts: [], total: memory.facts.length };
+  return { text: [head, ...lines].join('\n'), facts, total: memory.facts.length };
 };
 
 /** ツールが返す一覧の文面 */
@@ -114,10 +117,22 @@ export const formatFacts = (facts: readonly MemoryFact[]): string => {
 
 /** 新しい事実を書くときにモデルへ渡す指示 (プロンプト側と揃える) */
 export const MEMORY_TOOL_GUIDE = [
-  '覚えておくべき新しい事実を知ったら、memory ツールの remember で保存する。',
-  '- 対象: 人物の性格・立場・好み・関係、プロジェクトや決定、用語や由来。',
+  'このサーバーには 2 段の記憶がある。使い分けること。',
+  '',
+  '1. memory ツール — 短い事実の索引。毎ターン自動でプロンプトに載る (抜粋)。',
+  '   知ったらすぐ `memory` の remember で 1 行ずつ保存する。',
+  '   例: { "action": "remember", "facts": [{ "text": "たこは Rust 派 (2026-10 時点)", "tags": "たこ,Rust" }] }',
+  '   例: { "action": "remember", "text": "サーバーの本番は Evex", "scope": "guild" }',
+  '2. Notion (MCP ツール) — 長い記録の置き場。人物ページ、経緯、一覧、引用。',
+  '   プロンプトに載っているのは memory の抜粋だけなので、**詳しい話は Notion を検索して読む**。',
+  '   覚えておきたいことを詳しく書くときも Notion に書く (memory には 1 行の索引だけ置く)。',
+  '',
+  '記録のしかた:',
+  '- 対象: 人物の性格・立場・好み・関係、決まったこと、用語や由来、プロジェクト。',
   '- 保存しない: 挨拶・相槌・その場限りの雑談・推測・機微情報 (連絡先、本名、住所など)。',
-  '- 1 回 1 事実、現在形で短く書く (「〜は〜派」「〜を作っている」)。「〜と言った」の形にしない。',
-  '- 話している本人についての事実は scope: "user"、サーバー全体のことは scope: "guild"。',
-  '- 自分が書いた記憶は、次の会話から自動でプロンプトに載る (読み直す必要はない)。',
+  '- 1 事実 1 行・現在形で短く (「〜は〜派」「〜を作っている」)。「〜と言った」の形にしない。',
+  '- 話し相手についてなら scope: "user" (既定)、サーバー全体なら "guild"。',
+  '- 同じことを何度も保存しない (同じ文は 1 件にまとまる)。',
+  '- 自分が保存した事実は次の会話から自動で載る。読み直さなくてよい。',
+  '- Notion の URL や記憶の実装の話は、ユーザーに見せない。',
 ].join('\n');

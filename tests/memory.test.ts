@@ -135,7 +135,7 @@ test('memory ツールで保存・検索・削除でき、根拠の URL が残�
     meta('u1'),
   );
   assert.equal(remembered[0], true);
-  const id = (remembered[1] as { id: string }).id;
+  const id = (remembered[1] as { saved: Array<{ id: string }> }).saved[0]!.id;
 
   const memory = await loadMemory(GUILD);
   assert.equal(memory.facts.length, 1);

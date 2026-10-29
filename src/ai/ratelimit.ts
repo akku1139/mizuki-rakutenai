@@ -2,7 +2,6 @@
 
 const MAX_RETRIES = 3;
 const MAX_WAIT_MS = 60_000;
-const DEFAULT_WAIT_MS = 5_000;
 
 interface RetryDependencies {
   sleep: (ms: number) => Promise<void>;
@@ -30,7 +29,9 @@ export const fetchWithRateLimitRetry = async (
 
   for (let attempt = 0; ; attempt++) {
     const response = await request();
-    if (response.ok || attempt >= MAX_RETRIES) return response;
+    // 429 だけを再試行する。5xx まで待つと、要約の失敗のような「すぐ諦めたい」場面で
+    // 1 回のリクエストに 20 秒以上かかる (compact が固まる原因になった)
+    if (response.status !== 429 || attempt >= MAX_RETRIES) return response;
 
     // Quota/billing failures cannot be resolved by waiting. Inspect a clone so
     // the caller can still read the original response on terminal errors.
@@ -45,7 +46,7 @@ export const fetchWithRateLimitRetry = async (
     if (permanent.includes(String(code)) || permanent.includes(String(type))) return response;
 
     const delay = retryAfterMs(response.headers.get('retry-after'), now())
-      ?? Math.min(MAX_WAIT_MS, DEFAULT_WAIT_MS + 1000 * 2 ** attempt + Math.floor(random() * 1000));
+      ?? Math.min(MAX_WAIT_MS, 1000 * 2 ** attempt + Math.floor(random() * 1000));
     // Do not shorten a server-requested cooldown just to fit our wait budget.
     if (delay > MAX_WAIT_MS) return response;
     await response.body?.cancel();

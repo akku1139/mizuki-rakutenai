@@ -12,11 +12,13 @@ export const buildSystemPrompt = async (guild?: Guild | null, provider?: string)
   const includeMcp = provider !== 'rakutenai';
   const mcpTools = includeMcp ? getMcpTools() : [];
   const hasNotion = getMcpStatus().some(s => s.status === 'connected' && /notion/i.test(s.name));
-  // 記憶の記録は memory ツールが受け持つ。Notion はその保存先なので、
-  // 「Notion を直接いじる」指示は出さない (生の API を叩かれると重複する)
+  // Notion は禁止しない。memory ツールは「毎ターン載る索引」、Notion は「詳しい記録の置き場」で、
+  // 2 段を併用させる (索引だけでは足りないので、深い話は Notion を読ませる)
   const notionHint = hasNotion
-    ? 'Notion は記憶の保存先として接続されています。記録・検索は memory ツールを使ってください'
-      + ' (Notion の API を直接叩かない)。記憶の実装の詳細や Notion のページ URL は、ユーザーに明かしたり Discord に貼ったりしないこと。\n'
+    ? 'Notion はこのサーバーの詳しい記録の置き場として接続されています。'
+      + '人物ページ・経緯・一覧・引用など長い記録は Notion に書き、Notion のツールで検索・読み出ししてください。'
+      + '短い事実の索引は memory ツールが持ち、毎ターン自動でプロンプトに載ります。\n'
+      + 'Notion のページ URL や記憶の実装の話は、ユーザーに見せないこと。\n'
     : '';
 
   const mcpSection = mcpTools.length > 0
@@ -47,8 +49,8 @@ ${notionHint}MCP ツールは search_tools/run_tool 経由で利用できます�
 
 ===== 記憶 (重要) =====
 ${MEMORY_TOOL_GUIDE}
-覚えていることは、入力の先頭に「覚えていること」として自動で載る。書いた記憶を読み直す必要はない。
-記憶は要約なので、言い切る前に本人に確認する。
+覚えていることは、入力の先頭に「覚えていること」として自動で載る (抜粋)。書いた記憶を読み直す必要はない。
+抜粋に無い話は、memory ツールの search か Notion で探す。記憶は要約なので、言い切る前に本人に確認する。
 ==========
 
 ===== このサーバーで使えるDiscordカスタム絵文字一覧 =====
