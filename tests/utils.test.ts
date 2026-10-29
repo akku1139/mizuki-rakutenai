@@ -128,11 +128,15 @@ test('numbered message links are not wrapped again by suppressEmbeds', () => {
   assert.equal(suppressEmbeds(numberMessageLinks(`see ${a}`)), `see [\(1\)](<${a}>)`);
 });
 
-test('numberMessageLinks keeps markdown links to messages intact', () => {
+test('an explicit markdown link keeps its label and only gets <>', () => {
   const a = 'https://discord.com/channels/1/2/3';
-  assert.equal(numberMessageLinks(`[この発言](${a}) を見て`), `[\(1\)](<${a}>) を見て`);
+  // ラベルは残し、URL を <> で囲むだけ (番号に置き換えない)
+  assert.equal(numberMessageLinks(`[この発言](${a}) を見て`), `[この発言](<${a}>) を見て`);
+  // そのあと suppressEmbeds を通しても変わらない (冪等)
+  assert.equal(suppressEmbeds(numberMessageLinks(`[この発言](${a}) を見て`)), `[この発言](<${a}>) を見て`);
+  // 裸の URL は番号付きになる
   assert.equal(
-    numberMessageLinks(`[a](${a}) と [b](https://discord.com/channels/1/2/4)`),
-    `[\(1\)](<${a}>) と [\(2\)](<https://discord.com/channels/1/2/4>)`,
+    suppressEmbeds(numberMessageLinks(`[この発言](${a}) と ${a}`)),
+    `[この発言](<${a}>) と [\(1\)](<${a}>)`,
   );
 });

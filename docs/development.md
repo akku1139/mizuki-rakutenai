@@ -78,8 +78,9 @@ GitHub Actions (`.github/workflows/ci.yml`) で、main への push と PR のた
 
 `src/ai/mod.ts` が返信を送る前に `src/utils.ts` を通します。
 
-- `numberMessageLinks`: Discord / Fluxer のメッセージリンクを `[(1)](<url>)` の出典番号にする
-  (初出順、同じ URL は同じ番号、コード内は触らない)
+- `numberMessageLinks`: 裸の Discord / Fluxer メッセージリンクを `[(1)](<url>)` の出典番号にする
+  (初出順、同じ URL は同じ番号、コード内は触らない)。`[この発言](url)` の形はラベルを残し、
+  URL を `<...>` で囲むだけ
 - `suppressEmbeds`: URL を `<...>` で囲む (リンクのプレビューを出さない)。コードブロック・
   インラインコードの中は触らない
 - `splitLongString`: 1500 文字で分割。**コードブロックは壊さない** — 収まるものはそのまま、

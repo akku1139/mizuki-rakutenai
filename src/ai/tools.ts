@@ -913,6 +913,7 @@ export const refreshMcpTools = (): void => {
 
 /** ChatSessionへ渡すToolSpec (呼び出し時に最新の aitools を使う) */
 export const getAitoolsSpec = (): ToolSpec => ({
-  definitions: toOpenAITools(),
+  // 毎リクエスト評価する (MCP の再接続でツールが増減するため)
+  definitions: () => toOpenAITools(),
   execute: executeAITool,
 });

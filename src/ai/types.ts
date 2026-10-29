@@ -52,7 +52,12 @@ export type ChatContents = Array<
 
 /** プロバイダ非依存のツール群。definitionsはOpenAI function calling形式 */
 export interface ToolSpec {
-  definitions: Array<Record<string, unknown>>,
+  /**
+   * ツール定義。**関数ならリクエストのたびに評価する** (MCP のサーバーは再接続でツールが増減するので、
+   * セッション生成時の一覧を固定すると、接続が切れた瞬間に作られたセッションが以後ずっと
+   * MCP ツール無しになる)。
+   */
+  definitions: Array<Record<string, unknown>> | (() => Array<Record<string, unknown>>),
   execute(
     name: string,
     args: Record<string, unknown>,

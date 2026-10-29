@@ -105,6 +105,9 @@ docs/             機能ごとの仕様 (ai.md が AI の一次資料)
   サーバーごとに `data/memory/<guildId>.json`。書き込みは `memory` ツールに一本化し、
   Notion を直接叩かせない (重複する)。**ローカルに DB は作らない**方針 (sakana 式の木を
   入れるときは Notion 側に置く)。
+- **ツール定義は毎リクエスト評価** (`ToolSpec.definitions` は配列か関数)。MCP は再接続で
+  ツールが増減するので、セッション生成時に固定すると「2 ターン目から MCP ツールが消える」
+  (エラーでセッションが作り直された瞬間に接続が切れていると、そのセッションは以後ずっと無し)。
 - **MCP の結果は text だけではない** (`src/ai/mcp.ts` の `resultText`)。`resource` /
   `resource_link` / `image` / `audio` / `structuredContent` をテキストにする。text だけを見ると
   GitHub MCP の `get_file_contents` の中身が消える (実際にこれで読めなかった)。

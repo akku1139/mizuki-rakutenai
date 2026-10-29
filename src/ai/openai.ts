@@ -536,6 +536,11 @@ export class OpenAICompatChat implements ChatSession {
       ...this.#history.map(m => this.#withReasoning(m)),
     ]);
 
+    // MCP のサーバーは再接続でツールが増減するので、毎リクエストで引き直す
+    const definitions = this.#tools === undefined
+      ? []
+      : typeof this.#tools.definitions === 'function' ? this.#tools.definitions() : this.#tools.definitions;
+
     let stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk> | undefined;
     try {
       stream = await this.#client.chat.completions.create({
@@ -543,7 +548,7 @@ export class OpenAICompatChat implements ChatSession {
         messages: messages,
         stream: true,
         stream_options: { include_usage: true },
-        ...(this.#tools !== undefined && this.#tools.definitions.length > 0 ? { tools: this.#tools.definitions as unknown as OpenAI.Chat.ChatCompletionTool[] } : {}),
+        ...(definitions.length > 0 ? { tools: definitions as unknown as OpenAI.Chat.ChatCompletionTool[] } : {}),
       }, { timeout: 120_000 }) as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
     } catch (err) {
       // 失敗時は履歴を汚さない

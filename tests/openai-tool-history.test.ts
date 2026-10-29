@@ -12,7 +12,7 @@ import { OpenAICompatChat } from '../src/ai/openai.ts';
 import type { ToolSpec } from '../src/ai/types.ts';
 
 type Message = { role: string, content?: unknown, tool_calls?: Array<{ id: string }>, tool_call_id?: string, [k: string]: unknown };
-type Body = { messages: Message[] };
+type Body = { messages: Message[], tools?: unknown };
 
 const config = { baseUrl: 'https://llm.invalid/v1', apiKey: 'secret', model: 'test-model' };
 
@@ -218,4 +218,26 @@ test('思考過程を一度も返さないモデルには reasoning を付けな
     assert.equal(message.reasoning_content, undefined);
     assert.equal(message.reasoning, undefined);
   }
+});
+
+test('ツール一覧は毎リクエストで引き直す (MCP の再接続で増減する)', async t => {
+  const bodies = mockFetch(t,
+    () => stream(delta({ content: 'one' }), done),
+    () => stream(delta({ content: 'two' }), done),
+  );
+  let definitions: Array<Record<string, unknown>> = [];
+  // 最初は MCP が繋がっていない (ツール 0 件)
+  const chat = new OpenAICompatChat(config, { definitions: () => definitions, execute: async () => [true, {}] });
+  await say(chat, 'turn1');
+  assert.equal(bodies[0]!.tools, undefined, 'ツールが無いときは tools を送らない');
+
+  // 途中で MCP が繋がった
+  definitions = [{ type: 'function', function: { name: 'mcp__GitHub__get_file_contents' } }];
+  await say(chat, 'turn2');
+  assert.deepEqual(bodies[1]!.tools, definitions, '次のリクエストからツールが載る');
+
+  // 逆に切れたら消える
+  definitions = [];
+  await say(chat, 'turn3');
+  assert.equal(bodies.at(-1)!.tools, undefined, '切れたら送らない');
 });
