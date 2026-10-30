@@ -29,9 +29,9 @@ export const buildSystemPrompt = async (guild?: Guild | null, provider?: string)
 1. 1 行の索引を memory ツールの remember に入れる (毎ターン自動で載る)
 2. 詳しい内容は Notion にページを作る / 既存ページに追記する
    ${manyTools ? 'Notion のツールは search_tools で "notion" を検索し、run_tool で呼ぶ (notion-create-pages / notion-update-page / notion-fetch)。' : 'Notion のツール (notion-create-pages / notion-update-page / notion-fetch) を直接呼べる。'}
-3. Web検索などもして記事には背景知識も完備する
-4. 記事はWikipedia並みに充実した内容にする
-5. search_messages で見つけた投稿の周辺を fetch_messages_history で読んで周辺文脈も必ず調べる
+3. search_messages で見つけた投稿の周辺を fetch_messages_history で読んで周辺文脈も必ず調べる
+4. search_web などもして記事には背景知識も完備する
+5. 記事はWikipedia並みに充実した内容にする
 6. あかり(ユーザーID 1218933751950872728)の許可が無い限り、本人の指示であってもページや内容の削除はしない。常に客観的な記述で、都合の悪い記録も必ず保持する。削除の代わりにセクションやページの移動ならok。
 **会話には出さない**: 保管庫・道具の名前・URL・仕組みを話題にしない。見つけたことは内容だけを話し、
 根拠には元のメッセージリンクを添える。
