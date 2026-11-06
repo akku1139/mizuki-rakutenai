@@ -70,6 +70,8 @@ export interface ChatSession {
   /** ログ表示用のラベル (例: "rakutenai", "openai/gpt-4o-mini") */
   readonly label: string,
   readonly id: string,
+  /** 接続を持つプロバイダの解放。既に実行された上流の処理は取り消さない */
+  close?(): void,
   uploadFile(opts: { file: File, isImage?: boolean }): Promise<ChatFile>,
   sendMessage(message: {
     mode?: 'USER_INPUT' | 'DEEP_THINK' | 'AI_READ',

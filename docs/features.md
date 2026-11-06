@@ -21,6 +21,17 @@ Evex の Discord サーバーと Fluxer サーバーで起きた次のイベン�
 - Discord の embed の文字数制限を超えないよう、長い本文は末尾を `…` で切り詰めます
 - webhook の設定は環境変数 `DISCORD_LOG_WEBHOOK`、`FLUXER_LOG_WEBHOOK_ID`、`FLUXER_LOG_WEBHOOK_TOKEN` で行います
 
+### 即抜け通知のチャンネル指定
+
+`data/config.json` の `discord.quickLeaveChannelId` / `fluxer.quickLeaveChannelId` に、
+各サービスの同じサーバー内のチャンネルIDを指定すると、5分以内の退出だけをそこにも流します。
+未設定なら通常のログだけです。通知のメンションではpingしません。別サーバーへの指定は拒否し、
+通知失敗時も通常の退出ログは送ります。
+
+```json
+{ "discord": { "quickLeaveChannelId": "通知先チャンネルID" } }
+```
+
 ## 安価
 
 コードは `src/anka.ts` にあります。Discord でのみ動きます。

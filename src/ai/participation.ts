@@ -10,6 +10,11 @@ import { error } from '../log.ts';
 const busy = new Set<string>();
 const lastReply = new Map<string, number>();
 
+export const finishParticipation = (channelId: string, replied = false): void => {
+  if (replied) lastReply.set(channelId, Date.now());
+  busy.delete(channelId);
+};
+
 export const participationTarget = async (m: Message): Promise<string | undefined> => {
   const settings = config.ai?.participation;
   if (!settings?.channels.includes(m.channelId) || !m.guild || !m.channel.isTextBased() || m.author.bot) return;
@@ -17,6 +22,7 @@ export const participationTarget = async (m: Message): Promise<string | undefine
   if ((config.blacklistedChannels ?? []).some(id => id === m.channelId || id === parentId)) return;
   if (busy.has(m.channelId) || Date.now() - (lastReply.get(m.channelId) ?? 0) < (settings.cooldownMs ?? 60_000)) return;
   busy.add(m.channelId);
+  let selected = false;
   try {
     const recent = await m.channel.messages.fetch({ limit: 12, before: m.id });
     const messages = [...recent.values(), m].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
@@ -37,12 +43,12 @@ export const participationTarget = async (m: Message): Promise<string | undefine
     const target = data.answers?.reply?.choice;
     if (typeof probability !== 'number' || !Number.isFinite(probability) || probability < (settings.threshold ?? 0.85) || probability > 1) return;
     if (typeof target !== 'string' || !messages.some(msg => msg.id === target && !msg.author.bot)) return;
-    lastReply.set(m.channelId, Date.now());
+    selected = true;
     return target;
   } catch (e) {
     error('participation failed:', e);
     return;
   } finally {
-    busy.delete(m.channelId);
+    if (!selected) busy.delete(m.channelId);
   }
 };

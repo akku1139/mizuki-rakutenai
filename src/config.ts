@@ -8,6 +8,8 @@ export interface OpenAIProfile {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  /** ユーザーがaimodelで選べるモデル。未設定ならモデルIDの変更は不可 */
+  allowedModels?: string[];
   /** コンテキストウィンドウ (トークン)。auto-compact の予算はこの 75% */
   contextWindowTokens?: number;
 }
@@ -34,6 +36,7 @@ export interface Config {
     logWebhookUrl?: string;
     botUserId?: string;
     guildId?: string;
+    quickLeaveChannelId?: string;
   };
   fluxer?: {
     token?: string;
@@ -41,6 +44,7 @@ export interface Config {
     logWebhookToken?: string;
     botUserId?: string;
     guildId?: string;
+    quickLeaveChannelId?: string;
     apiBase?: string;
     cdnBase?: string;
   };

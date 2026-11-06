@@ -19,6 +19,7 @@ import {
 import { discord, fluxer } from '../clients.ts';
 import { config, get } from '../config.ts';
 import { saveWhMap, whMapDiscord, whMapFluxer, type WebhookLink } from './state.ts';
+import { cacheMessage } from './cache.ts';
 
 // TODO:
 // m.type === MessageType.UserJoin
@@ -28,13 +29,8 @@ const dToF = new Map<Snowflake, Snowflake>();
 const fToD = new Map<Snowflake, Snowflake>();
 
 const linkMessages = (discordId: Snowflake, fluxerId: Snowflake) => {
-  dToF.set(discordId, fluxerId);
-  fToD.set(fluxerId, discordId);
-  for (const m of [dToF, fToD]) {
-    if (m.size <= 5000) continue;
-    const oldest = m.keys().next();
-    if (!oldest.done) m.delete(oldest.value);
-  }
+  cacheMessage(dToF, discordId, fluxerId);
+  cacheMessage(fToD, fluxerId, discordId);
 };
 
 /** Each WebhookClient owns its own REST rate limit buckets. */

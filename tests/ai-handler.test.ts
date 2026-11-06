@@ -6,13 +6,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextChannel } from 'discord.js';
 import type { Message, OmitPartialGroupDMChannel } from 'discord.js';
+import { Thread, User } from '@evex/rakutenai';
 
 const cwd = process.cwd();
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mizuki-handler-'));
 process.chdir(dir);
 const { config } = await import('../src/config.ts');
 config.ai = { defaultProvider: 'openai', contextWindowTokens: 128000, openaiProfiles: { openai: { apiKey: 'test', baseUrl: 'https://llm.invalid/v1', model: 'test' } } };
-const { aiHandler, deleteAIReplies, getAIStatus } = await import('../src/ai/mod.ts');
+const { aiHandler, createChatSession, deleteAIReplies, getAIStatus } = await import('../src/ai/mod.ts');
+const { setUserProvider } = await import('../src/ai/prefs.ts');
 const { DISCORD_USER_ID, discord } = await import('../src/clients.ts');
 const { loadMemory, rememberFact, saveMemory } = await import('../src/memory/store.ts');
 test.after(async () => { process.chdir(cwd); await fs.rm(dir, { recursive: true, force: true }); });
@@ -72,6 +74,116 @@ test('初回の同時呼び出しも1セッションに並び、最新の記憶�
   await deleteAIReplies('100');
   assert.equal(f.sent[0].deleted, true);
   assert.equal(f.sent[1].deleted, false);
+});
+
+test('allowlist外と保存済みの禁止モデルはAPIへ送らず、許可モデルだけ選べる', async t => {
+  const f = fixtures('1212');
+  const profile = config.ai!.openaiProfiles!.openai;
+  profile.allowedModels = ['safe-model'];
+  const requests: Array<{ model: string }> = [];
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => { requests.push(JSON.parse(String(init.body))); return response('ok'); });
+  try {
+    await aiHandler(f.message('1200', 'allowed', '=aimodel openai fable'));
+    assert.match(f.sent.at(-1)!.content, /allowlist/);
+    assert.equal(requests.length, 0);
+    await setUserProvider('stored-unsafe', 'openai', 'fable');
+    await aiHandler(f.message('1201', 'stored-unsafe'));
+    assert.equal(requests.length, 0);
+    await assert.rejects(createChatSession('openai', undefined, 'fable'), /許可/);
+    await aiHandler(f.message('1202', 'allowed', '=aimodel openai safe-model'));
+    await aiHandler(f.message('1203', 'allowed'));
+    assert.equal(requests[0].model, 'safe-model');
+    delete profile.allowedModels;
+    await aiHandler(f.message('1204', 'allowed'));
+    assert.equal(requests.length, 1);
+    await assert.rejects(createChatSession('openai', undefined, 'safe-model'), /許可/);
+  } finally { delete profile.allowedModels; }
+});
+
+test('自動参加の返信先が過去でも最新発言を生成に渡す', async t => {
+  const f = fixtures('1313');
+  const old = f.message('1300', 'earlier', '前の質問');
+  const current = f.message('1302', 'latest', '最新の補足情報');
+  let deleted = false;
+  const reply = t.mock.method(old, 'reply', async (options: unknown) => ({ id: '1303', delete: async () => { deleted = true; }, edit: async () => {} }));
+  const requests: Array<{ messages: Array<{ role: string, content: string }> }> = [];
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => { requests.push(JSON.parse(String(init.body))); return response('回答'); });
+  await aiHandler(current, old);
+  const input = requests[0].messages.at(-1)!.content;
+  assert.match(input, /前の質問/);
+  assert.match(input, /最新の補足情報/);
+  assert.equal(reply.mock.callCount(), 1);
+  assert.ok(getAIStatus().sessions.some(s => s.key.endsWith(':latest')));
+  await deleteAIReplies(current.id);
+  assert.equal(deleted, true);
+});
+
+test('記憶と共有チャンネルの前置きも含めて1万文字以内に収める', async t => {
+  const f = fixtures('1414');
+  const memory = await loadMemory('1414');
+  for (let i = 0; i < 5; i++) rememberFact(memory, { scope: 'guild', text: `memory${i}:` + '記'.repeat(290) });
+  const history = new Map(Array.from({ length: 100 }, (_, i) => [String(1400 + i), f.message(String(1400 + i), 'history', '履'.repeat(300))]));
+  Object.defineProperty(f.channel, 'messages', { value: { fetch: async () => history }, configurable: true });
+  const requests: Array<{ messages: Array<{ role: string, content: string }> }> = [];
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => { requests.push(JSON.parse(String(init.body))); return response('ok'); });
+  config.ai!.sharePublicChannelContext = true;
+  try {
+    await aiHandler(f.message('1500', 'budget', '今回の依頼'));
+    const input = requests[0].messages.at(-1)!.content;
+    assert.ok(input.length <= 10000, String(input.length));
+    assert.match(input, /memory/);
+    assert.match(input, /現在のチャンネル/);
+    assert.match(input, /今回の依頼/);
+  } finally { config.ai!.sharePublicChannelContext = false; }
+});
+
+const fakeSocket = () => {
+  const socket = { onmessage: null, onerror: null, onclose: null as null | (() => void), sent: 0, closed: 0,
+    send: () => { socket.sent++; }, close: () => { socket.closed++; socket.onclose?.(); } };
+  return socket;
+};
+
+test('RakutenAI生成中のclearはSDKの実ストリームとWebSocketを閉じ、再接続しない', async t => {
+  const f = fixtures('1515');
+  const socket = fakeSocket();
+  const thread = new Thread('test-thread', {} as User, socket as unknown as WebSocket);
+  const reconnect = t.mock.method(Thread, 'connectWS', async () => { throw new Error('再接続は禁止'); });
+  t.mock.method(User, 'create', async () => ({ createThread: async () => thread } as unknown as User));
+  const old = config.ai!.defaultProvider;
+  config.ai!.defaultProvider = 'rakutenai';
+  try {
+    const task = aiHandler(f.message('1600', 'rakuten-cancel'));
+    for (let i = 0; i < 100 && socket.sent === 0; i++) await new Promise(resolve => setTimeout(resolve, 1));
+    assert.equal(socket.sent, 1);
+    await aiHandler(f.message('1601', 'rakuten-cancel', `<@${DISCORD_USER_ID}> clear`));
+    await task;
+    assert.equal(socket.closed, 1);
+    assert.equal(socket.onclose, null);
+    assert.equal(reconnect.mock.callCount(), 0);
+    assert.equal(getAIStatus().processing, 0);
+  } finally { thread.close(); config.ai!.defaultProvider = old; }
+});
+
+test('キャンセル後にSDKの初期化が完了しても接続を閉じて生成しない', async t => {
+  const f = fixtures('1616');
+  const socket = fakeSocket();
+  const thread = new Thread('late-thread', {} as User, socket as unknown as WebSocket);
+  let release!: () => void, creating = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  t.mock.method(User, 'create', async () => ({ createThread: async () => { creating = true; await gate; return thread; } } as unknown as User));
+  const old = config.ai!.defaultProvider;
+  config.ai!.defaultProvider = 'rakutenai';
+  try {
+    const task = aiHandler(f.message('1700', 'late-rakuten'));
+    for (let i = 0; i < 100 && !creating; i++) await new Promise(resolve => setTimeout(resolve, 1));
+    assert.equal(creating, true);
+    await aiHandler(f.message('1701', 'late-rakuten', `<@${DISCORD_USER_ID}> clear`));
+    await task;
+    release();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(socket.closed, 1);
+    assert.equal(socket.sent, 0);
+  } finally { release(); thread.close(); config.ai!.defaultProvider = old; }
 });
 
 test('ユーザーが違えば同時に生成できる', async t => {

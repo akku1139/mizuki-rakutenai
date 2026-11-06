@@ -8,6 +8,8 @@ import { cancelJob, clearFinishedJobs, enqueueJob, getJob, jobSummary, listJobs,
 
 // OpenAI SDK は鍵が空だとクライアントを作る時点で落ちるので、テスト用の鍵を置く
 process.env['OPENAI_API_KEY'] = 'test-key';
+process.env['OPENAI_BASE_URL'] = 'https://llm.invalid/v1';
+process.env['OPENAI_MODEL'] = 'test-model';
 
 const sse = (...deltas: object[]) => new Response(
   deltas.map(d => `data: ${JSON.stringify({ choices: [{ delta: d }] })}\n\n`).join('') + 'data: [DONE]\n\n',

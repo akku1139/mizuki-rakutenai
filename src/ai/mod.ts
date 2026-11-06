@@ -17,6 +17,7 @@ import process from 'node:process';
 import { config, get } from '../config.ts';
 import { DISCORD_USER_ID, discord, FLUXER_USER_ID, fluxer } from '../clients.ts';
 import { whMapFluxer } from '../fluxsync/state.ts';
+import { cacheMessage } from '../fluxsync/cache.ts';
 import { createFileFromUrl, getFileName, isEffectivelyEmpty, numberMessageLinks, splitLongString, suppressEmbeds } from '../utils.ts';
 import { formatUsage, runAgent } from './agent.ts';
 import { buildContextBlock } from './context.ts';
@@ -25,9 +26,7 @@ import { loadMemory } from '../memory/store.ts';
 import { embedImageUrls } from './embeds.ts';
 import { OpenAICompatChat } from './openai.ts';
 import { getUserModel, getUserProvider, loadPrefs, setUserProvider } from './prefs.ts';
-import { fetchModelListCached } from './model-meta.ts';
-import { participationTarget } from './participation.ts';
-import { rememberReply, removeSavedReplies } from './replies.ts';
+import { finishParticipation, participationTarget } from './participation.ts';
 import { buildSystemPrompt } from './prompt.ts';
 import { getAitoolsSpec, refreshMcpTools } from './tools.ts';
 import { connectAllMcp } from './mcp-registry.ts';
@@ -35,10 +34,11 @@ import type { AIEvent, ChatContents, ChatSession, ProviderName } from './types.t
 import { isProviderName, PROVIDERS } from './types.ts';
 
 /** RakutenAIのThreadをChatSessionに適合させる */
-class RakutenAIChat implements ChatSession {
+export class RakutenAIChat implements ChatSession {
   readonly label = 'rakutenai';
   readonly id: string;
   readonly t: Thread;
+  #closed = false;
 
   constructor(t: Thread) {
     this.t = t;
@@ -49,34 +49,46 @@ class RakutenAIChat implements ChatSession {
     return this.t.uploadFile(opts);
   }
 
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.t.close();
+  }
+
   async *sendMessage(message: {
     mode?: 'USER_INPUT' | 'DEEP_THINK' | 'AI_READ',
     contents: ChatContents,
+    signal?: AbortSignal,
   }): AsyncGenerator<AIEvent> {
-    yield* this.t.sendMessage({
-      mode: message.mode ?? 'USER_INPUT',
-      contents: message.contents,
-    } as never);
+    const close = () => this.close();
+    message.signal?.addEventListener('abort', close, { once: true });
+    try {
+      if (message.signal?.aborted) { close(); message.signal.throwIfAborted(); }
+      yield* this.t.sendMessage({ mode: message.mode ?? 'USER_INPUT', contents: message.contents });
+    } finally { message.signal?.removeEventListener('abort', close); }
   }
 }
 
 /** The message and the messages forwarded in it, whose attachments and embeds live in the snapshots. */
 const withSnapshots = (m: Message<boolean>) => [m, ...m.messageSnapshots.values()];
 
-const uploadMessageFiles = async (chat: ChatSession, messages: Message<boolean>[], seen: Set<string>): Promise<ChatContents> => {
+const uploadMessageFiles = async (chat: ChatSession, messages: Message<boolean>[], seen: Set<string>, signal: AbortSignal): Promise<ChatContents> => {
   const sources = messages.flatMap(m => withSnapshots(m).flatMap(s => [
     ...[...s.attachments.values()].map(a => ({ url: a.proxyURL, name: a.name, imageOnly: false })),
     ...embedImageUrls(s.embeds).map(url => ({ url, name: getFileName(url) || 'image', imageOnly: true })),
   ]));
   const out: ChatContents = [];
   for (const { url, name, imageOnly } of sources) {
+    signal.throwIfAborted();
     if (seen.has(url) || seen.size >= 20) continue;
     seen.add(url);
     try {
-      const file = await createFileFromUrl(url, name);
+      const file = await createFileFromUrl(url, name, signal);
+      signal.throwIfAborted();
       const isImage = file.type.startsWith('image/');
       if (imageOnly && !isImage) continue;
       out.push({ type: 'file', file: await chat.uploadFile({ file, isImage }) });
+      signal.throwIfAborted();
     } catch (e) { error('failed to load a file:', url, e); }
   }
   return out;
@@ -125,12 +137,13 @@ const defaultProvider = (): ProviderName => {
 
 const openAIConfig = (model?: string) => {
   const active = get(config, 'ai.activeOpenaiProfile', null);
-  const profile = active ? get(config, `ai.openaiProfiles.${active}`, {}) : {};
+  const profile = get(config, `ai.openaiProfiles.${active ?? 'openai'}`, {});
   return {
     baseUrl: profile.baseUrl ?? get(config, 'ai.openaiProfiles.openai.baseUrl', process.env['OPENAI_BASE_URL']),
     apiKey: profile.apiKey ?? get(config, 'ai.openaiProfiles.openai.apiKey', process.env['OPENAI_API_KEY']),
     model: model ?? profile.model ?? get(config, 'ai.openaiProfiles.openai.model', process.env['OPENAI_MODEL']),
     contextWindowTokens: profile.contextWindowTokens ?? get(config, 'ai.contextWindowTokens', undefined),
+    allowedModels: profile.allowedModels ?? [],
   };
 };
 
@@ -144,10 +157,14 @@ export const createChatSession = async (
   provider: ProviderName,
   meta?: { guildName?: string, channelName?: string },
   model?: string,
+  signal?: AbortSignal,
 ): Promise<ChatSession> => {
+  signal?.throwIfAborted();
   if (provider === 'openai') {
+    const settings = openAIConfig(model);
+    if (model && !settings.allowedModels.includes(model)) throw new Error('このモデルのユーザー選択は許可されていません');
     const chat = new OpenAICompatChat(
-      openAIConfig(model),
+      settings,
       getAitoolsSpec(),
     );
     if (meta?.guildName !== undefined && meta.channelName !== undefined) {
@@ -155,19 +172,26 @@ export const createChatSession = async (
     }
     return chat;
   }
-  return new RakutenAIChat(await (await User.create()).createThread());
+  const user = await User.create();
+  signal?.throwIfAborted();
+  const chat = new RakutenAIChat(await user.createThread());
+  if (signal?.aborted) { chat.close(); signal.throwIfAborted(); }
+  return chat;
 };
 
 /** 新規エントリを作成する。RakutenAIの場合はシステムプロンプトを返す */
 const newEntry = async (
   provider: ProviderName,
   m: OmitPartialGroupDMChannel<Message<boolean>>,
+  signal: AbortSignal,
 ): Promise<{ t: ChatSession, rep: string }> => {
   const rep = await buildSystemPrompt(m.guild, provider);
+  signal.throwIfAborted();
   const t = await createChatSession(provider, {
     guildName: m.guild?.name,
     channelName: m.channel.isDMBased() ? undefined : m.channel.name,
-  }, getUserModel(m.author.id));
+  }, getUserModel(m.author.id), signal);
+  if (signal.aborted) { t.close?.(); signal.throwIfAborted(); }
   t.setSystemPrompt?.(rep);
   return {
     t,
@@ -182,33 +206,33 @@ export const deleteAIReplies = async (id: string): Promise<void> => {
   const reply = replies.get(id);
   reply?.controller.abort();
   await Promise.all((reply?.messages ?? []).map(msg => msg.delete().catch(e => error('reply delete failed:', e))));
-  await removeSavedReplies(id).catch(e => error('saved reply delete failed:', e));
 };
 
 const resetSessions = (userId: string, key?: string): void => {
   for (const [k, entry] of chatStore) {
     if (!k.endsWith(`:${userId}`) || (key !== undefined && k !== key)) continue;
     entry.controller.abort();
+    entry.t?.close?.();
     chatStore.delete(k);
   }
 };
 
 setInterval(() => {
   const cutoff = Date.now() - 24 * 60 * 60_000;
-  for (const [key, entry] of chatStore) if (entry.jobs === 0 && entry.touched < cutoff) chatStore.delete(key);
+  for (const [key, entry] of chatStore) if (entry.jobs === 0 && entry.touched < cutoff) { entry.t?.close?.(); chatStore.delete(key); }
   for (const [key, reply] of replies) if (reply.touched < cutoff) replies.delete(key);
 }, 60_000).unref();
 
 let aiWaitingJobs = 0;
 let aiProcessingJobs = 0;
 
-const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean, signal?: AbortSignal): Promise<Message[]> => {
+const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, first: boolean, signal?: AbortSignal, sourceId = m.id): Promise<Message[]> => {
   const parts = splitLongString(suppressEmbeds(numberMessageLinks(text.replace(/^####+ /gm, '### '))), 1500);
 
   const sentMessages: Message[] = [];
 
   for(const part of parts) {
-    const reply = replies.get(m.id);
+    const reply = replies.get(sourceId);
     if (reply?.controller.signal.aborted || signal?.aborted) break;
     if(first) {
       sentMessages.push(await m.reply({ content: part, allowedMentions: { parse: [], repliedUser: false } }));
@@ -218,14 +242,16 @@ const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, 
     }
     const sent = sentMessages.at(-1)!;
     reply?.messages.push(sent);
-    if (!reply?.controller.signal.aborted && !signal?.aborted) await rememberReply(m, sent.id);
     if (reply?.controller.signal.aborted || signal?.aborted) await sent.delete().catch(() => {});
   }
 
   return sentMessages;
 };
 
-export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, automatic = false) => {
+export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, replyTo?: OmitPartialGroupDMChannel<Message<boolean>>) => {
+  const automatic = replyTo !== undefined;
+  const replyTarget = replyTo ?? m;
+  if (replyTarget.channelId !== m.channelId || replyTarget.guild?.id !== m.guild?.id) return;
   if (
     !m.author.bot
     && (automatic || m.mentions.users.has(DISCORD_USER_ID) || m.mentions.users.has(FLUXER_USER_ID) || /mizuki|瑞稀/i.test(m.content) || /^=aimodel(?:\s|$)/.test(m.content))
@@ -261,7 +287,7 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
       const model = modelMatch[3];
       if (p === undefined) {
         const current = getUserProvider(m.author.id) ?? defaultProvider();
-        await m.reply(`your AI model: \`${current}\`${getUserModel(m.author.id) ? ` / \`${getUserModel(m.author.id)}\`` : ''}\navailable: ${PROVIDERS.map(x => `\`${x}\``).join(', ')}\nusage: \`=aimodel <provider> [model]\``);
+        await m.reply(`your AI model: \`${current}\`${getUserModel(m.author.id) ? ` / \`${getUserModel(m.author.id)}\`` : ''}\navailable: ${PROVIDERS.map(x => `\`${x}\``).join(', ')}\nmodels: ${openAIConfig().allowedModels.map((id: string) => `\`${id}\``).join(', ') || '(ユーザー選択不可)'}\nusage: \`=aimodel <provider> [model]\``);
         return;
       }
       if (!isProviderName(p)) {
@@ -271,9 +297,8 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
       try {
         if (model) {
           const settings = openAIConfig();
-          const models = await fetchModelListCached(settings.baseUrl, settings.apiKey);
-          if (p !== 'openai' || !models.some(x => x.id === model)) {
-            await m.reply('選択できないモデルです。openai のプロバイダが公開するモデルIDを指定してください。');
+          if (p !== 'openai' || !settings.allowedModels.includes(model)) {
+            await m.reply('選択できないモデルです。運営者がallowlistで許可したモデルIDを指定してください。');
             return;
           }
         }
@@ -295,8 +320,12 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
     }
     entry.jobs++;
     const response = { controller: new AbortController(), messages: [] as Message[], touched: Date.now() };
-    replies.set(m.id, response);
-    const signal = AbortSignal.any([entry.controller.signal, response.controller.signal]);
+    cacheMessage(replies, m.id, response);
+    const preparation = new AbortController();
+    const signal = AbortSignal.any([entry.controller.signal, response.controller.signal, preparation.signal]);
+    let preparedChat: ChatSession | undefined;
+    const closeChat = () => preparedChat?.close?.();
+    signal.addEventListener('abort', closeChat, { once: true });
     const wait = async <T>(pending: Promise<T>): Promise<T> => {
       signal.throwIfAborted();
       let abort: () => void = () => {};
@@ -304,7 +333,7 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
       const stopped = new Promise<never>((_, reject) => {
         abort = () => reject(signal.reason ?? new Error('中断しました'));
         signal.addEventListener('abort', abort, { once: true });
-        timer = setTimeout(() => reject(new Error('AIの準備が120秒間進みませんでした')), 120_000);
+        timer = setTimeout(() => preparation.abort(new DOMException('AIの準備が120秒間進みませんでした', 'TimeoutError')), 120_000);
         timer.unref();
       });
       try { return await Promise.race([pending, stopped]); }
@@ -325,6 +354,8 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
       --aiWaitingJobs;
       ++aiProcessingJobs;
       signal.throwIfAborted();
+      const selectedModel = getUserModel(m.author.id);
+      if (entry.provider === 'openai' && selectedModel && !openAIConfig().allowedModels.includes(selectedModel)) throw new Error('このモデルのユーザー選択は許可されていません');
       if (shared) {
         // 以前のチャンネルが非公開になっていたら、そこの履歴を持ち出さない。
         for (const id of entry.channels) {
@@ -338,8 +369,10 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
         }
         entry.channels.add(m.channelId);
       }
-      const { t: chat, rep } = await wait(entry.ready ??= newEntry(entry.provider, m));
+      const { t: chat, rep } = await wait(entry.ready ??= newEntry(entry.provider, m, signal));
       entry.t = chat;
+      preparedChat = chat;
+      if (signal.aborted) { closeChat(); signal.throwIfAborted(); }
       info(m.id, ': start');
 
       let typingInFlight: Promise<void> | undefined;
@@ -363,8 +396,7 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
         .filter(msg => !lastBotMsgId || BigInt(msg.id) > BigInt(lastBotMsgId))
         .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
-      const replied = await wait(fetchRepliedMessages(m));
-      const contextBlock = buildContextBlock(m, sorted, entry.lastIds, rep.length, replied);
+      const replied = [...(replyTo && replyTo.id !== m.id ? [replyTo] : []), ...await wait(fetchRepliedMessages(m))];
 
       // 覚えていること (ChatGPT の user memory と同じく、検索せず毎ターン常駐させる)
       let memoryBlock = '';
@@ -380,11 +412,13 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
       }
 
       const attached = new Set<string>();
-      const files = await wait(uploadMessageFiles(chat, [m, ...replied, ...[...sorted].reverse()], attached));
+      const files = await wait(uploadMessageFiles(chat, [m, ...replied, ...[...sorted].reverse()], attached, signal));
 
-      const input = rep + memoryBlock + (memoryBlock === '' ? '' : '\n')
+      const prefix = rep + memoryBlock + (memoryBlock === '' ? '' : '\n')
         + (shared ? `[System] 現在のチャンネル: #${m.channel.name} (${m.channelId})\n` : '')
-        + (clearMatch?.[2] ? `[System] 履歴はリセット済み。今回の依頼: ${clearMatch[2]}\n` : '') + contextBlock;
+        + (automatic ? `[System] 最新の会話を踏まえ、メッセージ ${replyTarget.id} に返信してください。\n` : '')
+        + (clearMatch?.[2] ? `[System] 履歴はリセット済み。今回の依頼: ${clearMatch[2]}\n` : '');
+      const input = prefix + buildContextBlock(m, sorted, entry.lastIds, prefix.length, replied);
 
       log(m.id, `[${chat.label}]`, input);
 
@@ -397,7 +431,7 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
 
       const flushText = async (generationSignal: AbortSignal): Promise<void> => {
         if (isEffectivelyEmpty(pending)) return;
-        const msgs = await sendMessage(pending, m, first, generationSignal);
+        const msgs = await sendMessage(pending, replyTarget, first, generationSignal, m.id);
         sentMessageIds.push(...msgs.map(msg => msg.id));
         pending = '';
         first = false;
@@ -411,7 +445,7 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
           { type: 'text', text: input },
           ...files,
         ],
-        { msg: m, attachMessage: async (message: Message<boolean>) => { toolFiles.push(...await uploadMessageFiles(chat, [message], attached)); } },
+        { msg: m, attachMessage: async (message: Message<boolean>) => { toolFiles.push(...await uploadMessageFiles(chat, [message], attached, signal)); } },
         {
           signal,
           beforeRequest: async () => {
@@ -423,7 +457,7 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
             if (!buffered.length) return extra;
             cursor = buffered.at(-1)!.id;
             const trigger = buffered.at(-1)! as OmitPartialGroupDMChannel<Message>;
-            return [{ type: 'text', text: buildContextBlock(trigger, buffered.slice(0, -1), [], 0) }, ...extra, ...await uploadMessageFiles(chat, buffered, attached)];
+            return [{ type: 'text', text: buildContextBlock(trigger, buffered.slice(0, -1), [], 0) }, ...extra, ...await uploadMessageFiles(chat, buffered, attached, signal)];
           },
           onEvent: async (gen, generationSignal) => {
             if (generationSignal.aborted) return;
@@ -449,7 +483,7 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
 
                 if (last) await last.edit({ content: gen.url });
                 else {
-                  const msgs = await sendMessage(gen.url, m, first, generationSignal);
+                  const msgs = await sendMessage(gen.url, replyTarget, first, generationSignal, m.id);
                   last = msgs[0];
                   sentMessageIds.push(...msgs.map(msg => msg.id));
                 }
@@ -476,7 +510,6 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
                   await toolLogMsg.edit(toolText);
                 if (generationSignal.aborted) { await toolLogMsg?.delete().catch(() => {}); return; }
                 if (toolLogMsg && !response.messages.includes(toolLogMsg)) response.messages.push(toolLogMsg);
-                if (toolLogMsg) await rememberReply(m, toolLogMsg.id);
                 break;
               }
 
@@ -516,21 +549,24 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
       const usage = result.usage;
       text += `\n-# model: ${chat.label}${result.tools.size > 0 ? ` (${Array.from(result.tools, ([k, v]) => `\`${k}\`: ${v}`).join(', ')})` : ""}${usage !== undefined ? ` (tokens: ${formatUsage(usage)})` : ''}`;
       if (toolLogMsg) await toolLogMsg.delete().catch(() => {});
-      const finalMsgs = await sendMessage(text, m, first);
+      const finalMsgs = await sendMessage(text, replyTarget, first, undefined, m.id);
       sentMessageIds.push(...finalMsgs.map(msg => msg.id));
+      if (automatic && !result.error && !result.aborted && finalMsgs.length > 0) finishParticipation(m.channelId, true);
 
       // 今回のメッセージIDを保存
       if (!result.error) entry.lastIds = sentMessageIds;
     } catch (e) {
+      closeChat();
       entry.ready = undefined;
       entry.t = undefined;
       entry.lastIds = [];
-      if (signal.aborted) return;
+      if (signal.aborted && signal.reason?.name !== 'TimeoutError') return;
       error(m.id, ': An error occurred during processing\n', e);
       await sendMessage(`ERROR:\n\`\`\`\n${e}\n\`\`\``, m, true);
     } finally {
       stopTyping();
       signal.removeEventListener('abort', stopTyping);
+      signal.removeEventListener('abort', closeChat);
       --aiProcessingJobs;
       entry.jobs--;
       entry.touched = Date.now();
@@ -558,7 +594,10 @@ export const setupAI = async (): Promise<void> => {
       return;
     }
     const target = await participationTarget(m);
-    if (target) await aiHandler(target === m.id ? m : await m.channel.messages.fetch(target) as OmitPartialGroupDMChannel<Message<boolean>>, true);
+    if (target) {
+      try { await aiHandler(m, target === m.id ? m : await m.channel.messages.fetch(target) as OmitPartialGroupDMChannel<Message<boolean>>); }
+      finally { finishParticipation(m.channelId); }
+    }
   };
   discord.on('messageCreate', m => void received(m).catch(e => error('ai failed:', e)));
   fluxer.on('messageCreate', m => void received(m).catch(e => error('ai failed:', e)));

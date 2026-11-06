@@ -7,7 +7,7 @@ import { WebhookClient, type Client } from 'discord.js';
 import process from 'node:process';
 import { discord, fluxer } from '../clients.ts';
 import { config, get } from '../config.ts';
-import { quickLeaveNote } from './members.ts';
+import { quickLeaveNote, sendQuickLeaveNotice } from './members.ts';
 
 interface LogConfig {
   client: Client,
@@ -117,6 +117,7 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
     if (m.guild.id !== guildId) return;
     const note = quickLeaveNote(m.joinedTimestamp ?? joined.get(m.id) ?? null);
     joined.delete(m.id);
+    void sendQuickLeaveNotice(m, note).catch(e => error('quick leave notice failed:', e));
     await sendLog({
       description: `:airplane_departure: <@${m.user.id}> left ${footerText}${note}`,
       footer: {

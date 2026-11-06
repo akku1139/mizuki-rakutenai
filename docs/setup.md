@@ -44,7 +44,7 @@ cp .env.example .env
 | `AI_PROVIDER` | `rakutenai` | ユーザーが `aimodel` で選んでいない場合に使う AI プロバイダ (`rakutenai` / `openai`) |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI 互換 API のベース URL (末尾の `/` は付けない) |
 | `OPENAI_API_KEY` | (空) | OpenAI 互換 API のキー |
-| `OPENAI_MODEL` | `gpt-4o-mini` | 使用するモデル名。返信の末尾にもこの名前が表示されます |
+| `OPENAI_MODEL` | (未指定) | 使用するモデル名。返信の末尾にもこの名前が表示されます |
 | `READABILITY_ENDPOINT` | なし | 設定すると AI ツール `read_web` が有効になります |
 | `SEARCH_ENDPOINT` | なし | 設定すると AI ツール `search_web` が有効になります |
 | `OPENMIQ_TOKEN` | なし | MiQ 機能で使う API キー。未設定のまま `make` を使うと失敗します |
@@ -82,7 +82,6 @@ pnpm start   # node --env-file=.env index.ts
 | ファイル | 内容 |
 |---|---|
 | `data/ai_prefs.json` | ユーザーIDごとのプロバイダ・モデル設定 (古いプロバイダ名だけの形式も読み込めます) |
-| `data/ai_replies.json` | 呼び出し元メッセージIDと分割した返信IDの対応 (削除の連動用) |
 | `data/memory/<guildId>.json` | サーバーごとの保存済みの記憶 |
 | `data/fluxersync_fluxer.json` | Fluxer チャンネル → Discord チャンネルの同期設定と webhook |
 | `data/fluxersync_discord.json` | Discord チャンネル → Fluxer チャンネルの同期設定と webhook |
@@ -94,6 +93,7 @@ pnpm start   # node --env-file=.env index.ts
 次の状態はメモリ上にしか持っていないため、再起動するとリセットされます。
 
 - AI の会話履歴 (チャンネル × ユーザーごと)
+- AIの呼び出し元と返信の対応 (最大5000件・24時間。JSONには保存しません)
 - 進行中の安価
 - チャンネル同期で使うメッセージ ID の対応表 (再起動前のメッセージへの返信とリアクションは同期されません)
 - コイン監視で集計中の出来高
@@ -105,3 +105,6 @@ pnpm start   # node --env-file=.env index.ts
 - `ai.sharePublicChannelContext: true`: 全員が読めるチャンネル間で本人の履歴を共有 (既定 false)
 
 いずれも `data/config.json` で設定します。設定を足さなければ通常のメンション応答のままです。
+OpenAI互換APIのURL・キー・モデルはプロファイルか環境変数で明示してください。
+bot側では未設定のモデル名に既定値を補いません。`allowedModels` の設定例は [ai.md](ai.md#プロバイダ) にあります。
+RakutenAI SDKのパッチ適用が必要なため、依存はpnpmとコミット済みlockfileでインストールしてください。

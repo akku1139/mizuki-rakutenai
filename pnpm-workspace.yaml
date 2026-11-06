@@ -1,0 +1,2 @@
+patchedDependencies:
+  '@jsr/evex__rakutenai@0.1.19': patches/@jsr__evex__rakutenai@0.1.19.patch

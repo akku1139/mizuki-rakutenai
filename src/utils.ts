@@ -154,9 +154,10 @@ export const isEffectivelyEmpty = (text: string): boolean => {
   return cleanedText.length === 0;
 };
 
-export const createFileFromUrl = async (url: string, fileName: string): Promise<File> => {
+export const createFileFromUrl = async (url: string, fileName: string, signal?: AbortSignal): Promise<File> => {
   // 1. URLからデータを取得
-  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  const timeout = AbortSignal.timeout(30_000);
+  const response = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
   if (!response.ok) throw new Error(`failed to fetch ${fileName}: ${response.status} ${response.statusText}`);
 
   // 2. ResponseをBlob（バイナリデータ）に変換

@@ -61,6 +61,19 @@ test('createFileFromUrl throws when the response is not ok', async t => {
   await assert.rejects(createFileFromUrl('https://example.com/x', 'x.png'), /failed to fetch x\.png: 404 Not Found/);
 });
 
+test('添付の取得へ呼び出し元のキャンセルを伝える', async t => {
+  const controller = new AbortController();
+  let requestSignal: AbortSignal | undefined;
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
+    requestSignal = init.signal!;
+    return await new Promise<Response>((_resolve, reject) => requestSignal!.addEventListener('abort', () => reject(requestSignal!.reason), { once: true }));
+  });
+  const download = createFileFromUrl('https://example.com/file', 'file', controller.signal);
+  controller.abort();
+  await assert.rejects(download, { name: 'AbortError' });
+  assert.equal(requestSignal?.aborted, true);
+});
+
 test('splitLongString keeps a fitting code block in one part', () => {
   const text = 'まえ\n```ts\nconst x = 1;\n```\nあと';
   assert.deepEqual(splitLongString(text, 40), [text]);
