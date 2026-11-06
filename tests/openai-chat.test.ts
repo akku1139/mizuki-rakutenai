@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
+import { resetModelMetaCache } from '../src/ai/model-meta.ts';
 import { OpenAICompatChat } from '../src/ai/openai.ts';
 import type { AIEvent, ChatContents, ToolSpec } from '../src/ai/types.ts';
 
-type Body = { model: string, stream: boolean, tools?: unknown, messages: Array<{ role: string, content: unknown, tool_calls?: any[], tool_call_id?: string }> };
+type Body = { model: string, stream: boolean, tools?: unknown, messages: Array<{ role: string, content: unknown, tool_calls?: Array<{ id: string, function: { name: string, arguments: string } }>, tool_call_id?: string }> };
 
 const config = { baseUrl: 'https://llm.invalid/v1', apiKey: 'secret', model: 'test-model' };
 
@@ -26,9 +28,11 @@ const collect = async (chat: OpenAICompatChat, contents: ChatContents) => {
 const say = (chat: OpenAICompatChat, text: string) => collect(chat, [{ type: 'text', text }]);
 
 /** Mocks fetch with one handler per request, and records the request bodies. */
-const mockFetch = (t: { mock: { method: Function } }, ...responses: Array<() => Response>) => {
+const mockFetch = (t: Pick<TestContext, 'mock'>, ...responses: Array<() => Response>) => {
   const requests: Array<{ url: string, headers: Record<string, string>, body: Body }> = [];
   t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+    if (String(url) === 'https://models.dev/api.json') return Response.json({ test: { api: config.baseUrl, models: { 'test-model': { id: 'test-model', modalities: { input: ['text', 'image'] } } } } });
+    if (String(url).endsWith('/models')) return Response.json({ data: [{ id: 'test-model' }] });
     // SDK は Headers インスタンスを渡してくるので、テストでは素の object に均す
     requests.push({ url, headers: Object.fromEntries(new Headers(init.headers).entries()), body: JSON.parse(String(init.body)) });
     const next = responses[Math.min(requests.length, responses.length) - 1]!;
@@ -162,6 +166,7 @@ test('an HTTP error yields an error event and leaves the history as it was', asy
 });
 
 test('files become image parts, expanded text, or a note for unreadable formats', async t => {
+  resetModelMetaCache();
   const requests = mockFetch(t, () => stream(delta({ content: 'ok' }), done));
   const chat = new OpenAICompatChat(config);
   const image = await chat.uploadFile({ file: new File([new Uint8Array([1, 2])], 'a.png', { type: 'image/png' }), isImage: true });
@@ -183,6 +188,28 @@ test('files become image parts, expanded text, or a note for unreadable formats'
   assert.deepEqual(content[2], { type: 'text', text: '[添付ファイル: a.json]\n{"a":1}' });
   assert.equal(content[3]!.text, `[添付ファイル: long.txt]\n${'y'.repeat(20_000)}\n[添付ファイルの残りは省略されました]`);
   assert.deepEqual(content[4], { type: 'text', text: '[添付ファイル「a.zip」は、このAPI経路では読み取れない形式です]' });
+});
+
+test('OpenRouterの画像能力は公式カタログで確認し、非対応・不明なら画像を省く', async t => {
+  for (const vision of [true, false, undefined]) {
+    resetModelMetaCache();
+    const requests: Array<{ messages: Array<{ content: unknown }> }> = [];
+    t.mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+      if (String(url) === 'https://models.dev/api.json') return Response.json({ openrouter: { api: 'https://openrouter.ai/api/v1', models: { vision: { id: 'vision', modalities: { input: ['text', 'image'] } } } } });
+      if (String(url).endsWith('/models')) return vision === undefined ? new Response('unavailable', { status: 503 })
+        : Response.json({ data: [{ id: 'vision', architecture: { input_modalities: vision ? ['text', 'image'] : ['text'] } }] });
+      requests.push(JSON.parse(String(init?.body)) as (typeof requests)[number]);
+      return stream(delta({ content: 'ok' }), done);
+    });
+    const chat = new OpenAICompatChat({ ...config, baseUrl: 'https://openrouter.ai/api/v1', model: 'vision', contextWindowTokens: 128000 });
+    const image = await chat.uploadFile({ file: new File(['image'], 'image.png', { type: 'image/png' }), isImage: true });
+    const note = await chat.uploadFile({ file: new File(['expanded'], 'note.txt', { type: 'application/octet-stream' }) });
+    await collect(chat, [{ type: 'file', file: image }, { type: 'file', file: note }]);
+    const content = JSON.stringify(requests[0].messages.at(-1)!.content);
+    assert.equal(content.includes('image_url'), vision === true);
+    assert.ok(content.includes('expanded'));
+    if (vision !== true) assert.ok(content.includes('省略'));
+  }
 });
 
 test('a tool call is assembled from pieces, run without $explain, and answered before the reply', async t => {
@@ -244,4 +271,3 @@ test('without tools a tool call is answered with an error result', async t => {
   const events = await say(new OpenAICompatChat(config), 'q');
   assert.ok(events.some(e => e.type === 'tool-result' && (e.data.value as { error: string }).error === 'ツールが利用できません'));
 });
-

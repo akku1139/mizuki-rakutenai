@@ -93,16 +93,15 @@ pnpm start   # node --env-file=.env index.ts
 次の状態はメモリ上にしか持っていないため、再起動するとリセットされます。
 
 - AI の会話履歴 (チャンネル × ユーザーごと)
-- AIの呼び出し元と返信の対応 (最大5000件・24時間。JSONには保存しません)
+- AIの呼び出し元と返信の対応 (チャンネルごとの直近100呼び出し・24時間。JSONには保存しません)
 - 進行中の安価
 - チャンネル同期で使うメッセージ ID の対応表 (再起動前のメッセージへの返信とリアクションは同期されません)
 - コイン監視で集計中の出来高
 
 ## 任意の追加設定
 
-- [自動参加](participation.md): ローカルKevの起動と、判定するチャンネルの指定
-- [記憶Wiki](memory-site.md): サーバー別の公開範囲とDiscord OAuth・HTTPSの設定
-- `ai.sharePublicChannelContext: true`: 全員が読めるチャンネル間で本人の履歴を共有 (既定 false)
+- [自動参加](participation.md): llama-serverの起動と、判定するチャンネルの指定
+- `ai.shareChannelContext: true`: 本人とbotが読める同じサーバーのチャンネル間で履歴を共有 (既定 false)
 
 いずれも `data/config.json` で設定します。設定を足さなければ通常のメンション応答のままです。
 OpenAI互換APIのURL・キー・モデルはプロファイルか環境変数で明示してください。

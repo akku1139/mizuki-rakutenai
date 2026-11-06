@@ -2,7 +2,7 @@
 
 /// MCP クライアント接続 (teapot の実装を移植)。
 
-import type { Client } from '@modelcontextprotocol/client';
+import type { Client, OAuthClientProvider } from '@modelcontextprotocol/client';
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { SSEClientTransport } from '@modelcontextprotocol/client';
 import type { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
@@ -45,7 +45,7 @@ export interface McpServerConfig {
   timeoutMs?: number;
 }
 
-export interface McpAuth { provider: unknown; }
+export interface McpAuth { provider: OAuthClientProvider; }
 
 export interface McpConnection {
   tools(): Promise<McpTool[]>;
@@ -56,20 +56,20 @@ export interface McpConnection {
 
 /** ツール結果の中の 1 ブロックを、モデルに渡せるテキストにする */
 const blockText = async (
-  block: any,
+  block: Record<string, unknown>,
   read: (uri: string) => Promise<string>,
 ): Promise<string> => {
   const type = block?.type;
   if (type === 'text' && typeof block.text === 'string') return block.text;
   if (type === 'image') {
-    return `[画像 ${block.mimeType ?? '不明'} (${Math.round((block.data?.length ?? 0) * 0.75).toLocaleString()} バイト)]`;
+    return `[画像 ${block.mimeType ?? '不明'} (${Math.round((typeof block.data === 'string' ? block.data.length : 0) * 0.75).toLocaleString()} バイト)]`;
   }
   if (type === 'audio') {
-    return `[音声 ${block.mimeType ?? '不明'} (${Math.round((block.data?.length ?? 0) * 0.75).toLocaleString()} バイト)]`;
+    return `[音声 ${block.mimeType ?? '不明'} (${Math.round((typeof block.data === 'string' ? block.data.length : 0) * 0.75).toLocaleString()} バイト)]`;
   }
   // 埋め込みリソース: テキストなら中身、blob なら概要、uri だけなら取りに行く
   if (type === 'resource') {
-    const resource = block.resource ?? {};
+    const resource = (block.resource ?? {}) as { text?: unknown, blob?: unknown, mimeType?: unknown, uri?: unknown };
     if (typeof resource.text === 'string') return resource.text;
     if (typeof resource.blob === 'string') {
       return `[バイナリ ${resource.mimeType ?? '不明'} (${Math.round(resource.blob.length * 0.75).toLocaleString()} バイト)]`;
@@ -128,7 +128,7 @@ function toTools(list: { tools?: Array<Record<string, unknown>> }, server: strin
   return out;
 }
 
-export async function connectMcp(cfg: McpServerConfig, auth?: { provider: any }): Promise<McpConnection> {
+export async function connectMcp(cfg: McpServerConfig, auth?: McpAuth): Promise<McpConnection> {
   const sdk = await mcpSdk();
   const transport = cfg.transport ?? (cfg.command && !cfg.url ? 'stdio' : 'http');
   const client = new sdk.Client({ name: 'mizuki', version: '1' });
@@ -169,8 +169,9 @@ export async function connectMcp(cfg: McpServerConfig, auth?: { provider: any })
         async tools() { return []; },
         async call() { return { text: 'not connected', ok: false }; },
         async finishAuth(code: string, iss?: string) {
-          if (typeof (session as any).finishAuth !== 'function') throw new Error('this transport has no OAuth flow');
-          await (session as any).finishAuth(iss === undefined ? code : new URLSearchParams({ code, iss }));
+          if (!('finishAuth' in session)) throw new Error('this transport has no OAuth flow');
+          if (iss === undefined || session instanceof sdk.SSEClientTransport) await session.finishAuth(code);
+          else await session.finishAuth(new URLSearchParams({ code, iss }));
           await client.close().catch(() => {});
           return await connectMcp(cfg, auth);
         },
@@ -186,7 +187,7 @@ export async function connectMcp(cfg: McpServerConfig, auth?: { provider: any })
       let cursor: string | undefined;
       const seen = new Set<string>();
       for (let page = 0; page < 50; page++) {
-        const res: any = await client.listTools(cursor ? { cursor } : undefined);
+        const res = await client.listTools(cursor ? { cursor } : undefined);
         all.push(...toTools(res, cfg.name));
         const next = res?.nextCursor;
         if (typeof next !== 'string') return all;
@@ -197,15 +198,15 @@ export async function connectMcp(cfg: McpServerConfig, auth?: { provider: any })
       throw new Error('MCP tools/list did not finish within 50 pages');
     },
     async call(name, args) {
-      const res: any = await client.callTool({ name, arguments: (args ?? {}) as Record<string, unknown> });
+      const res = await client.callTool({ name, arguments: (args ?? {}) as Record<string, unknown> });
       return resultText(res, async (uri: string) => {
         try {
-          const read: any = await client.readResource({ uri });
-          const contents: any[] = read?.contents ?? [];
+          const read = await client.readResource({ uri });
+          const contents = read?.contents ?? [];
           return contents
-            .map(c => (typeof c?.text === 'string'
+            .map(c => ('text' in c
               ? c.text
-              : `[バイナリ ${c?.mimeType ?? '不明'} (${Math.round((c?.blob?.length ?? 0) * 0.75).toLocaleString()} バイト)]`))
+              : `[バイナリ ${c.mimeType ?? '不明'} (${Math.round(c.blob.length * 0.75).toLocaleString()} バイト)]`))
             .join('\n')
             .trim();
         } catch (err) {
@@ -214,8 +215,9 @@ export async function connectMcp(cfg: McpServerConfig, auth?: { provider: any })
       });
     },
     async finishAuth(code: string, iss?: string) {
-      if (typeof (session as any).finishAuth !== 'function') throw new Error('this transport has no OAuth flow');
-      await (session as any).finishAuth(iss === undefined ? code : new URLSearchParams({ code, iss }));
+      if (!('finishAuth' in session)) throw new Error('this transport has no OAuth flow');
+      if (iss === undefined || session instanceof sdk.SSEClientTransport) await session.finishAuth(code);
+      else await session.finishAuth(new URLSearchParams({ code, iss }));
       await client.close().catch(() => {});
       return await connectMcp(cfg, auth);
     },

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /// モデルの能力 (コンテキストウィンドウ) を、モデルカタログから引く。
-/// ../teapot の `src/model-meta.ts` の移植 (使わない能力 (値段・modalities・effort) は落としてある)。
+/// コンテキスト長と画像入力能力だけを読む。
 ///
 /// models.dev を正とする理由: 実際に使っているプロバイダのうち、能力を公開しているのは
 /// OpenRouter だけだった。Command Code・Google・orcarouter の `/models` は id と名前と
@@ -19,6 +19,8 @@ export interface ModelMeta {
   name?: string;
   /** コンテキストウィンドウ (トークン) */
   contextLength?: number;
+  /** 未公開なら未定義。画像を推測で送らないために使う */
+  inputModalities?: string[];
 }
 
 /** models.dev の 1 レコードのうち、ここで使う分 */
@@ -26,6 +28,7 @@ type MdModel = {
   id?: string;
   name?: string;
   limit?: { context?: number };
+  modalities?: { input?: string[] };
 };
 
 type MdProvider = { id?: string; api?: string | null; models?: Record<string, MdModel> };
@@ -115,7 +118,7 @@ const loadDb = async (): Promise<Snapshot> => {
       return snapshot;
     } catch {
       // 失敗を短く記憶する。空のマップは「分からない」であって「非対応」ではない
-      const snapshot: Snapshot = { at: Date.now(), providers: new Map(), negative: true };
+      const snapshot: Snapshot = { at: Date.now(), providers: new Map<string, MdProvider>(), negative: true };
       db = snapshot;
       return snapshot;
     }
@@ -133,6 +136,7 @@ export const metaFrom = (m: MdModel): ModelMeta => ({
   id: String(m.id ?? ''),
   ...(typeof m.name === 'string' ? { name: m.name } : {}),
   ...(typeof m.limit?.context === 'number' ? { contextLength: m.limit.context } : {}),
+  ...(Array.isArray(m.modalities?.input) ? { inputModalities: m.modalities.input.filter((v: unknown): v is string => typeof v === 'string') } : {}),
 });
 
 /** プロバイダ自身の `/models`。使える形で返らなければ null */
@@ -143,7 +147,8 @@ const fetchProviderModels = async (baseUrl: string, apiKey?: string): Promise<Mo
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) return null;
-  const json = (await res.json()) as { data?: Array<{ id?: unknown; name?: unknown; context_length?: unknown }> };
+  const json = (await res.json()) as { data?: Array<{ id?: unknown; name?: unknown; context_length?: unknown; architecture?: { input_modalities?: unknown } }> };
+  const openRouter = /(^|\.)openrouter\.ai$/i.test(new URL(baseUrl).hostname);
   const out: ModelMeta[] = [];
   for (const m of json.data ?? []) {
     if (typeof m.id !== 'string' || m.id === '') continue;
@@ -151,20 +156,23 @@ const fetchProviderModels = async (baseUrl: string, apiKey?: string): Promise<Mo
       id: m.id,
       ...(typeof m.name === 'string' ? { name: m.name } : {}),
       ...(typeof m.context_length === 'number' ? { contextLength: m.context_length } : {}),
+      ...(openRouter && Array.isArray(m.architecture?.input_modalities) ? { inputModalities: m.architecture.input_modalities.filter((v: unknown): v is string => typeof v === 'string') } : {}),
     });
   }
   return out.length > 0 ? out : null;
 };
 
 /** プロバイダの値が勝ち、models.dev は穴だけ埋める */
-const mergeMeta = (own: ModelMeta, fromDb: ModelMeta | undefined): ModelMeta => {
+const mergeMeta = (own: ModelMeta, fromDb: ModelMeta | undefined, openRouter: boolean): ModelMeta => {
   if (fromDb === undefined) return own;
   const contextLength = own.contextLength ?? fromDb.contextLength;
   const name = own.name ?? fromDb.name;
+  const inputModalities = openRouter ? own.inputModalities : fromDb.inputModalities;
   return {
     id: own.id,
     ...(name !== undefined ? { name } : {}),
     ...(contextLength !== undefined ? { contextLength } : {}),
+    ...(inputModalities !== undefined ? { inputModalities } : {}),
   };
 };
 
@@ -175,12 +183,13 @@ export const fetchModelList = async (baseUrl: string, apiKey?: string): Promise<
     fetchProviderModels(baseUrl, apiKey).catch(() => null),
   ]);
   const provider = providerFor(snapshot.providers, baseUrl);
+  const openRouter = /(^|\.)openrouter\.ai$/i.test(new URL(baseUrl).hostname);
   const dbModels = provider?.models !== undefined
     ? Object.values(provider.models).map(metaFrom).filter(m => m.id !== '')
     : [];
-  if (upstream === null) return dbModels;
+  if (upstream === null) return openRouter ? dbModels.map(({ inputModalities: _modalities, ...rest }) => rest) : dbModels;
   const byId = new Map(dbModels.map(m => [m.id, m]));
-  return upstream.map(m => mergeMeta(m, byId.get(m.id)));
+  return upstream.map(m => mergeMeta(m, byId.get(m.id), openRouter));
 };
 
 /**

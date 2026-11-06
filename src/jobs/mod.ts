@@ -100,7 +100,7 @@ const asProvider = (value: unknown): ProviderName | undefined =>
 
 const defaultProvider = (): ProviderName => {
   const v = get(config, 'ai.defaultProvider', process.env['AI_PROVIDER'] ?? 'rakutenai');
-  return isProviderName(String(v)) ? v : 'rakutenai';
+  return isProviderName(v) ? v : 'rakutenai';
 };
 
 /** チャンネルを Discord / Fluxer のどちらから引くか */

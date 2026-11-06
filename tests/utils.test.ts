@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createFileFromUrl, getFileName, isEffectivelyEmpty, numberMessageLinks, splitLongString, suppressEmbeds } from '../src/utils.ts';
+import { createFileFromUrl, getDisplayAvatarUrl, getFileName, isEffectivelyEmpty, numberMessageLinks, splitLongString, suppressEmbeds } from '../src/utils.ts';
 
 test('splitLongString keeps short text as one part', () => {
   assert.deepEqual(splitLongString('abc', 3), ['abc']);
@@ -162,4 +162,12 @@ test('URL内の括弧を残し、Markdownや文の外側の括弧だけを除く
   assert.equal(suppressEmbeds(`**[wiki](${url})**`), `**[wiki](<${url}>)**`);
   assert.equal(suppressEmbeds(`<${url}>`), `<${url}>`);
   assert.equal(suppressEmbeds(`[a](${url}),[b](https://example.com)`), `[a](<${url}>),[b](<https://example.com>)`);
+});
+
+test('アバターはサーバー・ユーザー画像の順で1024px WebPを取り、Fluxerの既定画像は取得可能なURLにする', () => {
+  const user = { id: '7', avatarURL: () => null, displayAvatarURL: () => 'https://discord-default.invalid/1.png' };
+  const member = { avatarURL: (options: unknown) => { assert.deepEqual(options, { size: 1024, extension: 'webp' }); return 'https://custom.invalid/a.webp'; } };
+  assert.equal(getDisplayAvatarUrl(user, member, true), 'https://custom.invalid/a.webp');
+  assert.equal(getDisplayAvatarUrl(user, null, true), 'https://cdn.discordapp.com/embed/avatars/1.png');
+  assert.equal(getDisplayAvatarUrl(user, null), 'https://discord-default.invalid/1.png');
 });

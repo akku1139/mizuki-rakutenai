@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Collection, type Guild } from 'discord.js';
@@ -15,4 +16,11 @@ test('the system prompt names both bot accounts and lists the server emojis', as
 test('the system prompt can be built without a server', async () => {
   const prompt = await buildSystemPrompt(null);
   assert.ok(prompt.includes('カスタム絵文字一覧'));
+});
+
+test('詳しい記録はNotionへ保存し、Wikiを増やさないことを明示する', async () => {
+  const prompt = await buildSystemPrompt(null, 'openai');
+  assert.match(prompt, /詳しい内容は Notion/);
+  assert.match(prompt, /別のWikiや公開サイトを作らない/);
+  assert.match(prompt, /Notionに記録してから最終回答/);
 });

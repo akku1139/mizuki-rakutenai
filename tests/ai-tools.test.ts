@@ -19,8 +19,8 @@ const fakeMessage = (id: string, content: string, extra: object = {}) => ({
   author: { id: 'u1', displayName: 'User', globalName: null, username: 'user', bot: false },
   reference: null,
   embeds: [],
-  attachments: new Map(),
-  messageSnapshots: new Map(),
+  attachments: new Map<string, unknown>(),
+  messageSnapshots: new Map<string, unknown>(),
   ...extra,
 });
 

@@ -1,7 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { log, info, warn, error } from './log.ts';
+import { mkdir } from 'node:fs/promises';
+import type { GuildMember, User } from 'discord.js';
 
 /// Small platform-independent helpers.
+
+export const parseJson = (text: string): unknown => JSON.parse(text) as unknown;
+
+export const getDisplayAvatarUrl = (user: Pick<User, 'id' | 'avatarURL' | 'displayAvatarURL'>, member: Pick<GuildMember, 'avatarURL'> | null | undefined, fromFluxer = false): string => {
+  const options = { size: 1024, extension: 'webp' } as const;
+  return member?.avatarURL(options) ?? user.avatarURL(options)
+    ?? (fromFluxer ? `https://cdn.discordapp.com/embed/avatars/${Number(BigInt(user.id) % 6n)}.png` : user.displayAvatarURL(options));
+};
+
+export const ensureDataDirectory = async (directory = './data'): Promise<void> => {
+  await mkdir(directory, { recursive: true });
+};
+
+export const MESSAGE_CACHE_LIMIT = 5000;
+export const cacheMessage = <T>(cache: Map<string, T>, id: string, value: T, limit = MESSAGE_CACHE_LIMIT): void => {
+  cache.set(id, value);
+  if (cache.size > limit) cache.delete(cache.keys().next().value!);
+};
 
 /** 改行を優先して切る (コードブロックを考えない素朴な分割) */
 const splitPlain = (text: string, len: number): Array<string> => {

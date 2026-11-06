@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { parseJson, ensureDataDirectory } from '../utils.ts';
 
 /// サーバーごとの記憶 (事実) の保存。
 ///
@@ -76,7 +77,7 @@ export const loadMemory = async (guildId: string): Promise<GuildMemory> => {
 const readMemory = async (guildId: string): Promise<GuildMemory> => {
   let memory: GuildMemory = { guildId, facts: [] };
   try {
-    const raw = JSON.parse(await fs.readFile(pathOf(guildId), 'utf8')) as Partial<GuildMemory>;
+    const raw = parseJson(await fs.readFile(pathOf(guildId), 'utf8')) as Partial<GuildMemory>;
     memory = {
       guildId,
       facts: Array.isArray(raw.facts) ? raw.facts.filter(isFact) : [],
@@ -103,7 +104,7 @@ export const saveMemory = async (memory: GuildMemory): Promise<void> => {
   memory.facts = trimmed;
   cache.set(memory.guildId, memory);
   const write = (writes.get(memory.guildId) ?? Promise.resolve()).catch(() => {}).then(async () => {
-    await fs.mkdir(MEMORY_DIR, { recursive: true });
+    await ensureDataDirectory(MEMORY_DIR);
     const body = JSON.stringify(memory, null, 2);
     // 同じサーバーの並列応答が一時ファイルを上書きしないよう直列に保存する。
     await fs.writeFile(`${pathOf(memory.guildId)}.tmp`, body);

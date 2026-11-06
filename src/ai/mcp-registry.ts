@@ -7,6 +7,8 @@ import { log, error } from '../log.ts';
 import { connectMcp, flattenToolName, splitToolName, type McpConnection, type McpServerConfig, type McpTool } from './mcp.ts';
 import { McpAuthStore, ServerAuth, listenForCallback, FLOW_TIMEOUT_MS } from './mcp-oauth-manager.ts';
 
+interface McpFailure { message?: string, status?: number, connection?: McpConnection }
+
 interface State {
   cfg: McpServerConfig;
   conn?: McpConnection;
@@ -70,10 +72,11 @@ export const connectMcpServer = async (name: string): Promise<void> => {
     st.tools = await conn.tools();
     st.status = 'connected';
     st.oauthRequired = false;
-  } catch (e: any) {
+  } catch (e) {
+    const failure = e as McpFailure | null;
     st.status = 'error';
-    st.lastError = e?.message ?? String(e);
-    const needsAuth = e?.status === 401 || e?.status === 403 || /unauthoriz|invalid_token|authorization required/i.test(e?.message ?? '');
+    st.lastError = failure?.message ?? String(e);
+    const needsAuth = failure?.status === 401 || failure?.status === 403 || /unauthoriz|invalid_token|authorization required/i.test(failure?.message ?? '');
     if (needsAuth) {
       st.oauthRequired = true;
       st.lastError = 'this server requires OAuth — use authorize';
@@ -97,10 +100,11 @@ export const connectAllMcp = async (): Promise<void> => {
       st.tools = await conn.tools();
       st.status = 'connected';
       st.oauthRequired = false;
-    } catch (e: any) {
+    } catch (e) {
+      const failure = e as McpFailure | null;
       st.status = 'error';
-      st.lastError = e?.message ?? String(e);
-      const needsAuth = e?.status === 401 || e?.status === 403 || /unauthoriz|invalid_token|authorization required/i.test(e?.message ?? '');
+      st.lastError = failure?.message ?? String(e);
+      const needsAuth = failure?.status === 401 || failure?.status === 403 || /unauthoriz|invalid_token|authorization required/i.test(failure?.message ?? '');
       if (needsAuth) {
         st.oauthRequired = true;
         st.lastError = 'this server requires OAuth — use authorize';
@@ -127,8 +131,9 @@ export const callMcpTool = async (flatName: string, args: unknown): Promise<{ ok
   }
   try {
     return await states.get(parts.server)!.conn!.call(parts.tool, args);
-  } catch (e: any) {
-    return { ok: false, text: `MCP call failed: ${e?.message ?? e}` };
+  } catch (e) {
+    const failure = e as McpFailure | null;
+    return { ok: false, text: `MCP call failed: ${failure?.message ?? e}` };
   }
 };
 
@@ -162,11 +167,12 @@ export const startMcpOAuth = async (name: string): Promise<{ url: string }> => {
     await loop.close().catch(() => {});
     flows.delete(name);
     return { url: '' };
-  } catch (err: any) {
+  } catch (err) {
+    const failure = err as McpFailure | null;
     pendingConn = (err as { connection?: McpConnection }).connection ?? null;
-    const url = auth.pendingUrl?.() ?? (auth as any).authUrl?.toString?.();
+    const url = auth.pendingUrl();
     if (!url) {
-      const message = err?.message ?? String(err);
+      const message = failure?.message ?? String(err);
       auth.markError(message);
       await loop.close().catch(() => {});
       flows.delete(name);
@@ -187,8 +193,9 @@ export const startMcpOAuth = async (name: string): Promise<{ url: string }> => {
         st.lastError = undefined;
         await loop.close().catch(() => {});
         flows.delete(name);
-      } catch (e: any) {
-        const msg = e?.message ?? String(e);
+      } catch (e) {
+        const failure = e as McpFailure | null;
+        const msg = failure?.message ?? String(e);
         auth.markError(msg);
         if (st.status === 'authorizing') st.status = 'error';
         st.lastError = msg;

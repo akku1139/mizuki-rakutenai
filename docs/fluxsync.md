@@ -62,3 +62,18 @@ Fluxer 側のチャンネルで、次のコマンドを実行します。
 
 同期している Fluxer チャンネルで瑞稀に話しかけた場合、会話は Discord 側のチャンネル ID で管理されます。
 詳しくは [ai.md](ai.md#会話の単位と順番) を参照してください。
+
+## Fluxer互換性の確認
+
+Fluxer本体のcommit `4d2df4f250d15fb04cf04f902678b03d392c0c46` の以下を確認しています。
+
+- [WebhookRequestSchemas.ts](https://github.com/fluxerapp/fluxer/blob/4d2df4f250d15fb04cf04f902678b03d392c0c46/packages/schema/src/domains/webhook/WebhookRequestSchemas.ts): `avatar_url`、`message_reference`を受け付ける
+- [WebhookService.ts](https://github.com/fluxerapp/fluxer/blob/4d2df4f250d15fb04cf04f902678b03d392c0c46/fluxer_api/src/api/webhook/WebhookService.ts): 外部アバターURLを取得し、メッセージの返信参照へ引き継ぐ
+- [AvatarUtils.ts](https://github.com/fluxerapp/fluxer/blob/4d2df4f250d15fb04cf04f902678b03d392c0c46/fluxer_app/src/features/user/utils/AvatarUtils.ts) と [asset_path.rs](https://github.com/fluxerapp/fluxer/blob/4d2df4f250d15fb04cf04f902678b03d392c0c46/fluxer_media_proxy/src/server/asset_path.rs): `/avatars/<user>/<hash>.webp` と `/guilds/<guild>/users/<user>/avatars/<hash>.webp` のパス
+- [MediaProxyImageSizes.ts](https://github.com/fluxerapp/fluxer/blob/4d2df4f250d15fb04cf04f902678b03d392c0c46/packages/constants/src/MediaProxyImageSizes.ts): `size=1024` を受け付ける
+
+Fluxerの既定画像はフロントエンドの静的アセットで、`fluxerusercontent.com/embed/avatars/0.png` は
+確認時に404でした。その互換外URLは生成せず、カスタムアバターがない場合はDiscord CDNの既定画像へ
+フォールバックします。Fluxerの独自ブランド画像と完全には一致しない場合があります。
+`tests/fluxsync-message.test.ts` ではmultipartのsnake_case・アバターURL・返信ID・メンション抑止を検査します。
+本番のDiscord/Fluxer間での送信確認は別途必要です。

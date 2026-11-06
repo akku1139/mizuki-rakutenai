@@ -14,7 +14,7 @@ export type AIEvent =
       outputTokens: number,
       cachedInputTokens?: number,
     } }
-  | { type: 'notification', data: any }
+  | { type: 'notification', data: unknown }
   | { type: 'disconnected' }
   | { type: 'tool-call', data: Array<{
       contentType: 'TEXT' | 'SUMMARY_TEXT',

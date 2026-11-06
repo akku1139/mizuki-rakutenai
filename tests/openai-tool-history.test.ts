@@ -7,7 +7,7 @@
 // 「会話がリセットされる」は同じ現象の裏表になりうる。
 
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import { OpenAICompatChat } from '../src/ai/openai.ts';
 import type { ToolSpec } from '../src/ai/types.ts';
 
@@ -29,7 +29,7 @@ const toolCall = (id: string, name = 'lookup') =>
   delta({ tool_calls: [{ index: 0, id, function: { name, arguments: '{}' } }] });
 
 /** リクエストを記録し、n 回目の呼び出しに responses[n-1] を返す (足りなければ最後を使い回す)。 */
-const mockFetch = (t: { mock: { method: Function } }, ...responses: Array<() => Response>) => {
+const mockFetch = (t: Pick<TestContext, 'mock'>, ...responses: Array<() => Response>) => {
   const bodies: Body[] = [];
   t.mock.method(globalThis, 'fetch', async (_url: string, init: RequestInit) => {
     bodies.push(JSON.parse(String(init.body)) as Body);
@@ -153,7 +153,7 @@ test('思考過程を返すモデルでは、そのターンの思考過程だ�
 
 /** 1ターンで rounds 回ツールを呼んでから答えるモデルを模す。 */
 const heavyTurn = (
-  t: { mock: { method: Function } },
+  t: Pick<TestContext, 'mock'>,
   rounds: number,
   record: (body: Body) => void,
 ) => {

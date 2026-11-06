@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fetchWithRateLimitRetry, retryAfterMs } from '../src/ai/ratelimit.ts';
@@ -222,7 +223,7 @@ test('OpenAI chat includes image and text attachments in the request', async t =
   assert.equal(eventCount, 2);
   assert.deepEqual(requestBody?.messages.at(-1)?.content, [
     { type: 'text', text: 'Please inspect these attachments.' },
-    { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2U=' } },
+    { type: 'text', text: '[添付画像「photo.png」はモデルの画像対応が確認できないため省略しました]' },
     { type: 'text', text: '[添付ファイル: notes.txt]\nhello' },
     { type: 'text', text: '[添付ファイル「report.pdf」は、このAPI経路では読み取れない形式です]' },
   ]);

@@ -15,9 +15,9 @@ const fake = (id: string, authorId: string, content: string, { bot = false, nick
   content,
   createdAt: new Date(0),
   reference: replyTo ? { messageId: replyTo } : null,
-  messageSnapshots: new Map(),
+  messageSnapshots: new Map<string, unknown>(),
   embeds: [],
-  attachments: new Map(),
+  attachments: new Map<string, unknown>(),
   member: nickname ? { displayName: nickname } : null,
   author: { id: authorId, bot, displayName: `${authorId}-display`, username: authorId },
 }) as unknown as OmitPartialGroupDMChannel<Message>;

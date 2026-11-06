@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { parseJson, ensureDataDirectory } from '../utils.ts';
 import { log, info, warn, error } from '../log.ts';
 
 /// ユーザーごとのAIプロバイダ設定の永続化 (data/ai_prefs.json)。
@@ -14,7 +15,7 @@ let writes = Promise.resolve();
 
 export const loadPrefs = async (): Promise<void> => {
   try {
-    const raw = JSON.parse((await fs.readFile(PREFS_FILE)).toString()) as Record<string, unknown>;
+    const raw = parseJson((await fs.readFile(PREFS_FILE)).toString()) as Record<string, unknown>;
     for (const [k, v] of Object.entries(raw)) {
       if (typeof v === 'string' && isProviderName(v)) prefs.set(k, v);
       else if (v && typeof v === 'object') {
@@ -36,14 +37,13 @@ export const getAllPrefs = (): Record<string, ProviderName> => Object.fromEntrie
 
 export const setUserProvider = (userId: string, provider: ProviderName, model?: string): Promise<void> => {
   const write = writes.catch(() => {}).then(async () => {
-    const next = new Map(prefs);
-    const nextModels = new Map(models);
-    next.set(userId, provider);
-    if (model) nextModels.set(userId, model);
-    else nextModels.delete(userId);
-    await fs.mkdir('./data', { recursive: true });
-    await fs.writeFile(`${PREFS_FILE}.tmp`, JSON.stringify(Object.fromEntries([...next].map(([id, p]) =>
-      [id, nextModels.has(id) ? { provider: p, model: nextModels.get(id) } : p]))));
+    await ensureDataDirectory();
+    const entries = [...prefs].filter(([id]) => id !== userId);
+    entries.push([userId, provider]);
+    await fs.writeFile(`${PREFS_FILE}.tmp`, JSON.stringify(Object.fromEntries(entries.map(([id, p]) => {
+      const selectedModel = id === userId ? model : models.get(id);
+      return [id, selectedModel ? { provider: p, model: selectedModel } : p];
+    }))));
     await fs.rename(`${PREFS_FILE}.tmp`, PREFS_FILE);
     prefs.set(userId, provider);
     if (model) models.set(userId, model);

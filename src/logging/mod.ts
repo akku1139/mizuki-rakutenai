@@ -7,6 +7,7 @@ import { WebhookClient, type Client } from 'discord.js';
 import process from 'node:process';
 import { discord, fluxer } from '../clients.ts';
 import { config, get } from '../config.ts';
+import { getDisplayAvatarUrl } from '../utils.ts';
 import { quickLeaveNote, sendQuickLeaveNotice } from './members.ts';
 
 interface LogConfig {
@@ -61,7 +62,7 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
       },
       author: {
         name: m.author?.username ?? 'unknown user',
-        icon_url: m.member?.displayAvatarURL({ size: 1024 }) ?? m.author?.displayAvatarURL({ size: 1024 }) ?? undefined,
+        icon_url: m.author ? getDisplayAvatarUrl(m.author, m.member, client === fluxer) : undefined,
       },
       timestamp: new Date().toISOString(),
       color: COLORS.delete,
@@ -77,7 +78,7 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
       },
       author: {
         name: o.author?.username ?? 'unknown user',
-        icon_url: o.member?.displayAvatarURL({ size: 1024 }) ?? o.author?.displayAvatarURL({ size: 1024 }) ?? undefined,
+        icon_url: o.author ? getDisplayAvatarUrl(o.author, o.member, client === fluxer) : undefined,
       },
       timestamp: new Date().toISOString(),
       color: COLORS.edit,
@@ -106,7 +107,7 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
       },
       author: {
         name: `${m.user.displayName} (${m.user.username})`,
-        icon_url: m.user.displayAvatarURL({ size: 1024 }) ?? undefined,
+        icon_url: getDisplayAvatarUrl(m.user, m, client === fluxer),
       },
       timestamp: new Date().toISOString(),
       color: COLORS.join,
@@ -125,7 +126,7 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
       },
       author: {
         name: `${m.user.displayName} (${m.user.username})`,
-        icon_url: m.user.displayAvatarURL({ size: 1024 }) ?? undefined,
+        icon_url: getDisplayAvatarUrl(m.user, m, client === fluxer),
       },
       timestamp: new Date().toISOString(),
       color: COLORS.leave,

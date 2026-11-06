@@ -14,11 +14,10 @@ export const buildSystemPrompt = async (guild?: Guild | null, provider?: string)
   const includeMcp = provider !== 'rakutenai';
   const mcpTools = includeMcp ? getMcpTools() : [];
   const connected = getMcpStatus().filter(s => s.status === 'connected');
-  const hasNotion = connected.some(s => /notion/i.test(s.name));
   const manyTools = mcpTools.length > 20;
 
   // 保管庫 (Notion) は非公開。使うのは積極的に、会話には出さない
-  const archive = hasNotion
+  const archive = includeMcp
     ? `===== 記録の置き場 (非公開) =====
 このサーバーの長い記録は、非公開の保管庫 (Notion) に置いてある。検索・読み出し・追記は Notion のツールで行う。
 **返答を書く前に**、次のものを見つけたら先に保存する (会話が流れると二度と残らない):
@@ -28,6 +27,8 @@ export const buildSystemPrompt = async (guild?: Guild | null, provider?: string)
 保存のしかた:
 1. 1 行の索引を memory ツールの remember に入れる (毎ターン自動で載る)
 2. 詳しい内容は Notion にページを作る / 既存ページに追記する
+   保存先はこの2層だけ。memoryに長文を詰めず、別のWikiや公開サイトを作らない。
+   長い調査・議論・まとめは、根拠と確認できた事実をNotionに記録してから最終回答を返す。
    ${manyTools ? 'Notion のツールは search_tools で "notion" を検索し、run_tool で呼ぶ (notion-create-pages / notion-update-page / notion-fetch)。' : 'Notion のツール (notion-create-pages / notion-update-page / notion-fetch) を直接呼べる。'}
 3. search_messages で見つけた投稿の周辺を fetch_messages_history で読んで周辺文脈も必ず調べる
 4. search_web などもして記事には背景知識も完備する

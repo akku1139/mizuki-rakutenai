@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { parseJson } from './src/utils.ts';
 import { log, info, warn, error } from './src/log.ts';
 
 import { PushDataV3ApiWrapper } from './mexc-proto/PushDataV3ApiWrapper.ts';
 
 type WsEvent =
   | { type: 'MARKET_DATA'; data: PushDataV3ApiWrapper }
-  | { type: 'CONTROL'; data: any };
+  | { type: 'CONTROL'; data: unknown };
 
 export class MexcWebsocketClient {
   #ws: WebSocket | null = null;
@@ -32,7 +33,7 @@ export class MexcWebsocketClient {
       this.#resubscribe();
     };
 
-    this.#ws.onmessage = (event: MessageEvent) => {
+    this.#ws.onmessage = (event: MessageEvent<unknown>) => {
       this.#handleMessage(event);
     };
 
@@ -69,11 +70,11 @@ export class MexcWebsocketClient {
     });
   }
 
-  #handleMessage(event: MessageEvent): void {
+  #handleMessage(event: MessageEvent<unknown>): void {
     // 1. JSONメッセージの処理
     if (typeof event.data === 'string') {
       try {
-        const json = JSON.parse(event.data);
+        const json: unknown = parseJson(event.data);
         // メインループをブロックしないよう非同期で通知
         queueMicrotask(() => this.#onMessage({ type: 'CONTROL', data: json }));
       } catch (e) {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cacheMessage, MESSAGE_CACHE_LIMIT } from '../src/fluxsync/cache.ts';
+import { cacheMessage, MESSAGE_CACHE_LIMIT } from '../src/utils.ts';
 
 test('同期と返信の共用キャッシュは5000件を超えたら古い対応から捨てる', () => {
   const cache = new Map<string, string[]>();

@@ -43,6 +43,17 @@ test('自動継続は3回で止まり、無限に生成しない', async t => {
   assert.equal(requests, 4);
 });
 
+test('本文の自動継続上限と関係なくツールは12ラウンド以上往復できる', async t => {
+  let requests = 0, executed = 0;
+  t.mock.method(globalThis, 'fetch', async () => sse(++requests <= 12
+    ? [{ choices: [{ delta: { tool_calls: [{ index: 0, id: `c${requests}`, function: { name: 'test', arguments: requests === 1 ? 'null' : '{}' } }] } }] }]
+    : [text('finished')]));
+  const chat = new OpenAICompatChat(cfg, { definitions: [], execute: async (_name, args) => { assert.deepEqual(args, {}); executed++; return [true, 'ok']; } });
+  const result = await runAgent(chat, [{ type: 'text', text: 'q' }], undefined);
+  assert.equal(executed, 12);
+  assert.equal(result.text, 'finished');
+});
+
 const stalled = (): ChatSession => ({
   label: 'stalled', id: 'stalled', uploadFile: async () => { throw new Error('unused'); },
   async *sendMessage(): AsyncGenerator<AIEvent> { await new Promise(() => {}); },

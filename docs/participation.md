@@ -1,35 +1,24 @@
-# ローカルモデルによる自動参加
+# llama.cppによる自動参加
 
-`src/ai/participation.ts` が、許可したチャンネルだけでローカルKevの
-`POST /v1/systemone` を呼びます。判定器は文章を生成せず、参加する確率と返信先を選びます。
-実際の返事は普段のAIプロバイダが作ります。直接のメンションは判定器を通りません。
+`src/ai/participation.ts` が、許可したチャンネルだけでローカルの `llama-server` の
+`POST /v1/chat/completions` を呼びます。判定はJSON制約付きで、返事の本文は普段のAIプロバイダが作ります。
+直接のメンションは判定器を通りません。Python・PyTorchのサイドカーは使いません。
 
-## INT8サーバー
+## サーバーの起動
 
-Python 3.12または3.13を使い、[Kev公式リポジトリ](https://github.com/jaredpalmer/kev)を
-独立した仮想環境にインストールしてください。PyPIの同名 `kev` は別物なので使いません。
-Node側に依存パッケージは追加しません。
+[llama.cpp公式配布](https://github.com/ggml-org/llama.cpp/releases) の `llama-server` と、
+チャットテンプレートを持つGGUFモデルを用意してください。
+例えば [ggml-org/Qwen3-0.6B-GGUF](https://huggingface.co/ggml-org/Qwen3-0.6B-GGUF) には
+`Qwen3-0.6B-Q4_0.gguf` があります。既存のKev専用headをGGUFとして流用する実装ではありません。
 
 ```sh
-git clone https://github.com/jaredpalmer/kev.git
-cd kev
-git checkout 2074cc44256200bb37540103fa4572901faa10f3
-python -m venv .venv
-# Linux/macOS: . .venv/bin/activate
-# Windows PowerShell: .venv/Scripts/Activate.ps1
-python -m pip install "torch==2.8.0" --index-url https://download.pytorch.org/whl/cpu
-python -m pip install ".[serve]"
-cd /path/to/mizuki-rakutenai
-python scripts/participation-server.py --self-check
-python scripts/participation-server.py
+llama-server -m /path/to/model.gguf --alias mizuki-participation --host 127.0.0.1 --port 8010 -c 4096
 ```
 
-`jaredpalmer/kev-0.6b` (Qwen3-0.6B、重みrevision `dece6dba8d43f0f7ded45e9f5b9df12474d90843`) を読み、backboneのLinearだけを動的INT8に変換します。
-判定headと埋め込みはFP32のままです。公式サーバーを再利用し、`127.0.0.1:8009` だけに待ち受けます。
-起動時に `INT8 Linear layers: N` を表示します。初回は重みのダウンロードと量子化で時間がかかります。
-`/v1/models` の `dtype: float32` は残した埋め込み等の型であり、LinearのINT8を否定するものではありません。
-PyTorch 2.10以降で削除予定のAPIを使うので2.8に固定しています。上げるときはtorchaoへ移行してください。
-Qwen3.5等のハイブリッドモデルやGPU向けの量子化には対応しません。
+`response_format: { type: "json_object", schema: ... }` の制約付きJSONを扱える版を使います。
+[公式サーバー仕様](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md#post-v1chatcompletions-openai-compatible-chat-completions-endpoint) に対応したリクエストです。
+Qwen3向けには `chat_template_kwargs.enable_thinking: false` を付け、判定の出力だけを最大128トークン生成します。
+これは判定器の出力上限であり、本体のツール往復回数を制限するものではありません。
 
 ## botの設定
 
@@ -39,9 +28,9 @@ Qwen3.5等のハイブリッドモデルやGPU向けの量子化には対応し�
 {
   "ai": {
     "participation": {
-      "endpoint": "http://127.0.0.1:8009/v1/systemone",
+      "endpoint": "http://127.0.0.1:8010/v1/chat/completions",
       "channels": ["1437420093259907175"],
-      "model": "kev-latest",
+      "model": "mizuki-participation",
       "threshold": 0.85,
       "cooldownMs": 60000
     }
@@ -49,20 +38,19 @@ Qwen3.5等のハイブリッドモデルやGPU向けの量子化には対応し�
 }
 ```
 
-最大13発言・末尾6000文字を `state` に渡し、`noul` で参加確率、`choice` で返信先を選びます。
-返信先は渡した人間のメッセージIDに限定します。bot発言、ブラックリスト、許可外のチャンネルは
-判定しません。チャンネルごとの同時判定・自動生成は1つです。実際の返信に成功してから既定で60秒待ちます。
-判定後の取得失敗・生成失敗ではクールダウンを消費しません。
-生成のトリガーは最新の発言のまま保持し、Kevが選ぶ過去の返信先とは分けます。
-最新の補足発言と選んだ返信先の両方を生成へ渡します。
-APIエラー・5秒のタイムアウト・不正な応答・低確率なら黙って通常のメンション待ちに戻ります。
-運営者が許可したチャンネルのログを扱う設計です。外部に送らないためローカルURLを使ってください。
+最大13発言・末尾6000文字を渡し、`participate`・`confidence`・`replyTo` を受け取ります。
+返信先は渡した人間のメッセージIDに限定します。返されたJSONも型・範囲・IDを検証します。
+`confidence` はモデルの自己評価で、校正済みの確率ではありません。
 
-## 検証と限界
+bot発言・ブラックリスト・許可外のチャンネルは判定しません。チャンネルごとの同時判定・自動生成は1つです。
+実際の返信成功後に既定で60秒待ち、取得・生成失敗ではクールダウンを消費しません。
+APIエラー・15秒のタイムアウト・不正な応答・低い自己評価・参加不要の判定なら返答しません。
+返信先が過去の発言でも、最新のトリガーと返信先の両方を生成へ渡します。
 
-- `tests/participation.test.ts`: 許可範囲、判定確率と返信先の検証、外部APIはモック
-- `--self-check`: 小さいLinearをINT8化し、変換前後の推論値を比較
-- 実際のKev-0.6BをCPUでINT8化して起動し、`/v1/systemone` の確率・返信先の応答を確認
+運営者が許可したチャンネルのログを扱うため、外部送信を避ける場合はループバックURLを指定してください。
 
-日本語Discord会話での参加精度や閾値は未校正です。推論が動くことと、参加判定が適切なことは
-別なので、既定では有効にしません。運営者が少数のチャンネルで判定を確認してから有効にしてください。
+## 検証範囲
+
+`tests/participation.test.ts` でJSONスキーマ・許可範囲・型と値・返信先・クールダウンをAPIモックで検査します。
+llama.cppの実バイナリによる推論と、日本語会話での判定精度・閾値は未検証です。
+旧Kevの実行結果は、このllama.cpp経路の動作確認には数えません。

@@ -17,8 +17,7 @@ import process from 'node:process';
 import { config, get } from '../config.ts';
 import { DISCORD_USER_ID, discord, FLUXER_USER_ID, fluxer } from '../clients.ts';
 import { whMapFluxer } from '../fluxsync/state.ts';
-import { cacheMessage } from '../fluxsync/cache.ts';
-import { createFileFromUrl, getFileName, isEffectivelyEmpty, numberMessageLinks, splitLongString, suppressEmbeds } from '../utils.ts';
+import { cacheMessage, createFileFromUrl, getFileName, isEffectivelyEmpty, numberMessageLinks, splitLongString, suppressEmbeds } from '../utils.ts';
 import { formatUsage, runAgent } from './agent.ts';
 import { buildContextBlock } from './context.ts';
 import { recall } from '../memory/recall.ts';
@@ -136,14 +135,14 @@ const defaultProvider = (): ProviderName => {
 };
 
 const openAIConfig = (model?: string) => {
-  const active = get(config, 'ai.activeOpenaiProfile', null);
-  const profile = get(config, `ai.openaiProfiles.${active ?? 'openai'}`, {});
+  const active = config.ai?.activeOpenaiProfile;
+  const profile = config.ai?.openaiProfiles?.[active ?? 'openai'] ?? {};
   return {
     baseUrl: profile.baseUrl ?? get(config, 'ai.openaiProfiles.openai.baseUrl', process.env['OPENAI_BASE_URL']),
     apiKey: profile.apiKey ?? get(config, 'ai.openaiProfiles.openai.apiKey', process.env['OPENAI_API_KEY']),
     model: model ?? profile.model ?? get(config, 'ai.openaiProfiles.openai.model', process.env['OPENAI_MODEL']),
-    contextWindowTokens: profile.contextWindowTokens ?? get(config, 'ai.contextWindowTokens', undefined),
-    allowedModels: profile.allowedModels ?? [],
+    contextWindowTokens: profile.contextWindowTokens ?? config.ai?.contextWindowTokens,
+    allowedModels: Array.isArray(profile.allowedModels) ? profile.allowedModels : [],
   };
 };
 
@@ -162,6 +161,7 @@ export const createChatSession = async (
   signal?.throwIfAborted();
   if (provider === 'openai') {
     const settings = openAIConfig(model);
+    if (!settings.baseUrl || !settings.apiKey || !settings.model) throw new Error('OpenAI互換APIのURL・キー・モデルを設定してください');
     if (model && !settings.allowedModels.includes(model)) throw new Error('このモデルのユーザー選択は許可されていません');
     const chat = new OpenAICompatChat(
       settings,
@@ -200,10 +200,11 @@ const newEntry = async (
 };
 
 const chatStore = new Map<string, ChatEntry>();
-const replies = new Map<string, { controller: AbortController, messages: Message[], touched: number }>();
+type Reply = { controller: AbortController, messages: Message[], touched: number };
+const replies = new Map<string, Map<string, Reply>>();
 
-export const deleteAIReplies = async (id: string): Promise<void> => {
-  const reply = replies.get(id);
+export const deleteAIReplies = async (id: string, channelId?: string): Promise<void> => {
+  const reply = (channelId ? replies.get(channelId) : [...replies.values()].find(cache => cache.has(id)))?.get(id);
   reply?.controller.abort();
   await Promise.all((reply?.messages ?? []).map(msg => msg.delete().catch(e => error('reply delete failed:', e))));
 };
@@ -220,7 +221,10 @@ const resetSessions = (userId: string, key?: string): void => {
 setInterval(() => {
   const cutoff = Date.now() - 24 * 60 * 60_000;
   for (const [key, entry] of chatStore) if (entry.jobs === 0 && entry.touched < cutoff) { entry.t?.close?.(); chatStore.delete(key); }
-  for (const [key, reply] of replies) if (reply.touched < cutoff) replies.delete(key);
+  for (const [channelId, cache] of replies) {
+    for (const [id, reply] of cache) if (reply.touched < cutoff) cache.delete(id);
+    if (cache.size === 0) replies.delete(channelId);
+  }
 }, 60_000).unref();
 
 let aiWaitingJobs = 0;
@@ -232,7 +236,7 @@ const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, 
   const sentMessages: Message[] = [];
 
   for(const part of parts) {
-    const reply = replies.get(sourceId);
+    const reply = replies.get(m.channelId)?.get(sourceId);
     if (reply?.controller.signal.aborted || signal?.aborted) break;
     if(first) {
       sentMessages.push(await m.reply({ content: part, allowedMentions: { parse: [], repliedUser: false } }));
@@ -262,10 +266,11 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
     const parentId = m.channel.parentId;
     if ((config.blacklistedChannels ?? []).some(id => id === m.channelId || id === parentId)) return;
     const channelKey = whMapFluxer[m.channelId] ? whMapFluxer[m.channelId].targetChannelID : m.channelId;
-    const publicChannel = (channel: TextChannel | ThreadChannel): boolean => channel instanceof TextChannel
-      && !channel.nsfw && !!channel.permissionsFor(m.guild!.roles.everyone)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory]);
-    const shared = config.ai?.sharePublicChannelContext === true && publicChannel(m.channel);
-    const contextKey = `${shared ? `${m.client === discord ? 'discord' : 'fluxer'}:${m.guild.id}:public` : channelKey}:${m.author.id}`;
+    const shareableChannel = (channel: TextChannel | ThreadChannel): boolean => channel instanceof TextChannel && !channel.nsfw
+      && !!channel.permissionsFor(m.member ?? m.author.id)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory])
+      && !!channel.permissionsFor(m.client.user?.id ?? (m.client === discord ? DISCORD_USER_ID : FLUXER_USER_ID))?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory]);
+    const shared = config.ai?.shareChannelContext === true && shareableChannel(m.channel);
+    const contextKey = `${shared ? `${m.client === discord ? 'discord' : 'fluxer'}:${m.guild.id}:shared` : channelKey}:${m.author.id}`;
 
     const clearMatch = automatic ? null : m.content.match(new RegExp(`^<@!?(${DISCORD_USER_ID}|${FLUXER_USER_ID})>\\s+clear(?:\\s+([\\s\\S]*))?$`));
     if (clearMatch) {
@@ -320,7 +325,9 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
     }
     entry.jobs++;
     const response = { controller: new AbortController(), messages: [] as Message[], touched: Date.now() };
-    cacheMessage(replies, m.id, response);
+    let channelReplies = replies.get(m.channelId);
+    if (!channelReplies) { channelReplies = new Map<string, Reply>(); replies.set(m.channelId, channelReplies); }
+    cacheMessage(channelReplies, m.id, response, 100);
     const preparation = new AbortController();
     const signal = AbortSignal.any([entry.controller.signal, response.controller.signal, preparation.signal]);
     let preparedChat: ChatSession | undefined;
@@ -357,10 +364,10 @@ export const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>, 
       const selectedModel = getUserModel(m.author.id);
       if (entry.provider === 'openai' && selectedModel && !openAIConfig().allowedModels.includes(selectedModel)) throw new Error('このモデルのユーザー選択は許可されていません');
       if (shared) {
-        // 以前のチャンネルが非公開になっていたら、そこの履歴を持ち出さない。
+        // 共有元を本人かbotが読めなくなったら、そこの履歴を持ち出さない。
         for (const id of entry.channels) {
           const channel = await wait(m.guild.channels.fetch(id, { force: true }));
-          if (!(channel instanceof TextChannel) || !publicChannel(channel)) {
+          if (!(channel instanceof TextChannel) || !shareableChannel(channel)) {
             entry.ready = undefined;
             entry.lastIds = [];
             entry.channels.clear();
@@ -583,8 +590,8 @@ export const getAIStatus = (): { waiting: number, processing: number, sessions: 
 
 export const setupAI = async (): Promise<void> => {
   for (const client of [discord, fluxer]) {
-    client.on('messageDelete', m => void deleteAIReplies(m.id));
-    client.on('messageDeleteBulk', ms => { for (const id of ms.keys()) void deleteAIReplies(id); });
+    client.on('messageDelete', m => void deleteAIReplies(m.id, m.channelId));
+    client.on('messageDeleteBulk', ms => { for (const id of ms.keys()) void deleteAIReplies(id, ms.first()?.channelId); });
   }
   await loadPrefs();
   const received = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {

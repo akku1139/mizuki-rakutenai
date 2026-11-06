@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { parseJson } from '../utils.ts';
 import { log, info, warn, error } from '../log.ts';
 
 /// OpenAI互換 (/v1/chat/completions) API を ChatSession インターフェースに適合させるアダプタ。
@@ -98,7 +99,7 @@ const textFromFile = (file: ChatFile): string | undefined => {
   const dataUrl = /^data:([^;,]+);base64,(.*)$/s.exec(file.fileUrl);
   if (!dataUrl || !/^text\/|^application\/(?:json|xml|x-yaml|yaml|csv)$/i.test(
     dataUrl[1]!,
-  )) return undefined;
+  ) && !/\.(?:txt|md|csv|json|jsonl|yaml|yml|log)$/i.test(file.fileName)) return undefined;
   const text = Buffer.from(dataUrl[2]!, 'base64').toString('utf8');
   return text.length > MAX_TEXT_ATTACHMENT_CHARS
     ? `${text.slice(0, MAX_TEXT_ATTACHMENT_CHARS)}\n[添付ファイルの残りは省略されました]`
@@ -129,6 +130,7 @@ export class OpenAICompatChat implements ChatSession {
   #compactedAtLen = 0;
   /** モデルカタログから引いたコンテキストウィンドウ (解決は 1 回だけ) */
   #catalogWindowTokens: Promise<number | undefined> | undefined;
+  #imageSupport: Promise<boolean> | undefined;
   /** 直近に使ったウィンドウの出どころ (変わったときだけログに出す) */
   #windowSource: 'config' | 'catalog' | 'default' | undefined;
   /**
@@ -209,6 +211,19 @@ export class OpenAICompatChat implements ChatSession {
     };
   }
 
+  async #filePart(file: ChatFile): Promise<OpenAI.Chat.ChatCompletionContentPart> {
+    if (file.isImage) {
+      this.#imageSupport ??= fetchModelListCached(this.#config.baseUrl, this.#config.apiKey)
+        .then(list => list.find(m => m.id === this.#config.model)?.inputModalities?.includes('image') === true);
+      if (await this.#imageSupport) return { type: 'image_url', image_url: { url: file.fileUrl } };
+      return { type: 'text', text: `[添付画像「${file.fileName}」はモデルの画像対応が確認できないため省略しました]` };
+    }
+    const text = textFromFile(file);
+    return { type: 'text', text: text === undefined
+      ? `[添付ファイル「${file.fileName}」は、このAPI経路では読み取れない形式です]`
+      : `[添付ファイル: ${file.fileName}]\n${text}` };
+  }
+
   async *sendMessage(message: {
     mode?: 'USER_INPUT' | 'DEEP_THINK' | 'AI_READ',
     contents: ChatContents,
@@ -228,18 +243,7 @@ export class OpenAICompatChat implements ChatSession {
       ? userText
       : [
           ...(userText ? [{ type: 'text' as const, text: userText }] : []),
-          ...files.map((file): OpenAI.Chat.ChatCompletionContentPart => {
-            if (file.isImage) {
-              return { type: 'image_url', image_url: { url: file.fileUrl } };
-            }
-            const text = textFromFile(file);
-            return {
-              type: 'text',
-              text: text === undefined
-                ? `[添付ファイル「${file.fileName}」は、このAPI経路では読み取れない形式です]`
-                : `[添付ファイル: ${file.fileName}]\n${text}`,
-            };
-          }),
+          ...await Promise.all(files.map(file => this.#filePart(file))),
         ];
 
     yield* this.#agentLoop(userContent, message.meta, message.signal, message.beforeRequest);
@@ -250,7 +254,7 @@ export class OpenAICompatChat implements ChatSession {
     this.#historyBeforeTurn = [...this.#history];
     this.#history.push({ role: 'user', content: userContent });
 
-    let continuations = 0;
+    let textContinuations = 0;
     while (true) {
       signal?.throwIfAborted();
       let sawToolCall = false;
@@ -258,11 +262,12 @@ export class OpenAICompatChat implements ChatSession {
 
       for await (const ev of this.#complete(meta, signal)) {
         if (ev.type === 'tool-call-detail') sawToolCall = true;
-        if (ev.type === 'notification' && ev.data?.finishReason === 'length') truncated = true;
+        if (ev.type === 'notification' && ev.data !== null && typeof ev.data === 'object' && 'finishReason' in ev.data && ev.data.finishReason === 'length') truncated = true;
         yield ev;
       }
 
-      if (truncated && continuations++ < 3) {
+      // 出力上限で途切れた本文だけを継続する。ツール往復には回数制限を設けない。
+      if (truncated && textContinuations++ < 3) {
         this.#history.push({ role: 'user', content: '出力が上限で途切れました。重複せず続きから完成させてください。' });
       } else if (!sawToolCall) return;
       const buffered = await beforeRequest?.();
@@ -270,8 +275,7 @@ export class OpenAICompatChat implements ChatSession {
         const parts: OpenAI.Chat.ChatCompletionContentPart[] = [];
         for (const c of buffered) {
           if (c.type === 'text') parts.push({ type: 'text', text: c.text });
-          else if (c.file.isImage) parts.push({ type: 'image_url', image_url: { url: c.file.fileUrl } });
-          else parts.push({ type: 'text', text: textFromFile(c.file) ?? `[読めない添付: ${c.file.fileName}]` });
+          else parts.push(await this.#filePart(c.file));
         }
         this.#history.push({ role: 'user', content: parts });
       }
@@ -685,7 +689,8 @@ export class OpenAICompatChat implements ChatSession {
         signal?.throwIfAborted();
         let args: Record<string, unknown> = {};
         try {
-          args = JSON.parse(c.arguments || '{}');
+          const parsed: unknown = parseJson(c.arguments || '{}');
+          if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) args = parsed as Record<string, unknown>;
         } catch {
           // 引数が壊れている場合は空で実行
         }

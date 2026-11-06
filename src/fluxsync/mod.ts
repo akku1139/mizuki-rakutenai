@@ -8,6 +8,7 @@ import {
   type Client,
   type Guild,
   type Message,
+  type PartialMessage,
   type MessageReaction,
   type OmitPartialGroupDMChannel,
   type PartialMessageReaction,
@@ -19,7 +20,7 @@ import {
 import { discord, fluxer } from '../clients.ts';
 import { config, get } from '../config.ts';
 import { saveWhMap, whMapDiscord, whMapFluxer, type WebhookLink } from './state.ts';
-import { cacheMessage } from './cache.ts';
+import { cacheMessage, getDisplayAvatarUrl } from '../utils.ts';
 
 // TODO:
 // m.type === MessageType.UserJoin
@@ -72,7 +73,7 @@ const onDiscordMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<
     },
     message_reference: repliedId === undefined ? undefined : { message_id: repliedId },
     username: `${m.member?.nickname ?? m.author.displayName}#Discord`,
-    avatar_url: m.member?.displayAvatarURL({ size: 1024 }) ?? m.author.displayAvatarURL({ size: 1024 }) ?? void 0,
+    avatar_url: getDisplayAvatarUrl(m.author, m.member, m.client === fluxer),
     content: convertEmojis(m.content, guildOfChannel(fluxer, whInfo.targetChannelID)) + stickerLinks(m.stickers),
     embeds: m.embeds,
     attachments: Array.from(m.attachments.values()).map((a, i) => ({
@@ -90,7 +91,6 @@ const onDiscordMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<
     // https://github.com/fluxerapp/fluxer/blob/29f0f34c76414adb40fcd8dfd040f6b7f4da2b41/fluxer_api/src/api/webhook/tests/WebhookMultipartAttachmentUploads.test.ts
     // https://deepwiki.com/search/webhook_0ce957d0-db57-4f93-8e53-4b8471941adf?mode=deep
     tts: m.tts,
-    withComponents: false,
   }));
 
   (await Promise.all(m.attachments.map<Promise<[string, Blob]>>(async a => [a.name, await (await fetch(a.proxyURL)).blob()])))
@@ -140,7 +140,7 @@ const onFluxerMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<v
       parse: [], // とりあえずメンション無し
     },
     username: `${m.member?.nickname ?? m.author.displayName}#Fluxer`,
-    avatarURL: m.member?.displayAvatarURL({ size: 1024 }) ?? m.author.displayAvatarURL({ size: 1024 }) ?? void 0,
+    avatarURL: getDisplayAvatarUrl(m.author, m.member, m.client === fluxer),
     content: (replyLine + convertEmojis(m.content, targetGuild) + stickerLinks(m.stickers)).slice(0, 2000),
     embeds: m.embeds,
     files: [...m.attachments.values()],
@@ -169,7 +169,7 @@ const bridgeReactions = (from: Client, to: Client, idMap: Map<Snowflake, Snowfla
   from.on('messageReactionRemove', (r, u) => void handle(r, u, true));
 };
 
-const onDiscordMessageUpdate = async (oldMsg: any, newMsg: any): Promise<void> => {
+const onDiscordMessageUpdate = async (oldMsg: Message | PartialMessage, newMsg: Message | PartialMessage): Promise<void> => {
   const m = newMsg.partial ? await newMsg.fetch().catch(() => newMsg) : newMsg;
   const fluxerId = dToF.get(m.id);
   if (!fluxerId) return;
@@ -221,7 +221,7 @@ const onDiscordMessageDelete = async (m: Message | { id: Snowflake, channelId: S
   }
 };
 
-const onFluxerMessageUpdate = async (oldMsg: any, newMsg: any): Promise<void> => {
+const onFluxerMessageUpdate = async (oldMsg: Message | PartialMessage, newMsg: Message | PartialMessage): Promise<void> => {
   const m = newMsg.partial ? await newMsg.fetch().catch(() => newMsg) : newMsg;
   const discordId = fToD.get(m.id);
   if (!discordId) return;
@@ -235,8 +235,9 @@ const onFluxerMessageUpdate = async (oldMsg: any, newMsg: any): Promise<void> =>
       embeds: m.embeds,
       allowedMentions: { parse: [] },
     });
-  } catch (e: any) {
-    if (e?.code === 10008 || e?.status === 404) {
+  } catch (e) {
+    const failure = e as { code?: number, status?: number } | null;
+    if (failure?.code === 10008 || failure?.status === 404) {
       fToD.delete(m.id);
       dToF.delete(discordId);
     }

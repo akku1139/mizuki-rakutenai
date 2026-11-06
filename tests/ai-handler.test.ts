@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TextChannel } from 'discord.js';
 import type { Message, OmitPartialGroupDMChannel } from 'discord.js';
+import { resetModelMetaCache } from '../src/ai/model-meta.ts';
 import { Thread, User } from '@evex/rakutenai';
 
 const cwd = process.cwd();
@@ -30,14 +31,14 @@ const fixtures = (channelId: string, emojiFetch: () => Promise<unknown[]> = asyn
     return { id: String(++nextId), delete: async () => { record.deleted = true; }, edit: async () => {} };
   };
   const guild = { id: guildId, name: 'test guild', emojis: { fetch: emojiFetch }, roles: { everyone: {} }, channels: { fetch: async (id: string) => channels.get(id) } };
-  const channel = Object.create(TextChannel.prototype);
-  for (const [key, value] of Object.entries({ id: channelId, name: 'test', guild, parentId: null, nsfw: false, permissionsFor: () => ({ has: () => true }), isTextBased: () => true, isDMBased: () => false, sendTyping: async () => { typing++; }, send, messages: { fetch: async () => new Map() } })) {
+  const channel = Object.create(TextChannel.prototype) as unknown as TextChannel;
+  for (const [key, value] of Object.entries({ id: channelId, name: 'test', guild, parentId: null, nsfw: false, permissionsFor: () => ({ has: () => true }), isTextBased: () => true, isDMBased: () => false, sendTyping: async () => { typing++; }, send, messages: { fetch: async () => new Map<string, unknown>() } })) {
     Object.defineProperty(channel, key, { value, configurable: true });
   }
   channels.set(channelId, channel);
   const message = (id: string, user = 'u1', content = `<@${DISCORD_USER_ID}> hi`) => ({
     id, guild, channelId, channel, client: discord, content, author: { id: user, bot: false, displayName: user, username: user }, member: null,
-    createdAt: new Date(), createdTimestamp: Date.now(), reference: null, messageSnapshots: new Map(), attachments: new Map(), embeds: [],
+    createdAt: new Date(), createdTimestamp: Date.now(), reference: null, messageSnapshots: new Map<string, unknown>(), attachments: new Map<string, unknown>(), embeds: [],
     mentions: { users: new Map([[DISCORD_USER_ID, {}]]) }, reply: send,
   }) as unknown as OmitPartialGroupDMChannel<Message>;
   return { sent, message, channel, typing: () => typing };
@@ -126,7 +127,7 @@ test('記憶と共有チャンネルの前置きも含めて1万文字以内に�
   Object.defineProperty(f.channel, 'messages', { value: { fetch: async () => history }, configurable: true });
   const requests: Array<{ messages: Array<{ role: string, content: string }> }> = [];
   t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => { requests.push(JSON.parse(String(init.body))); return response('ok'); });
-  config.ai!.sharePublicChannelContext = true;
+  config.ai!.shareChannelContext = true;
   try {
     await aiHandler(f.message('1500', 'budget', '今回の依頼'));
     const input = requests[0].messages.at(-1)!.content;
@@ -134,7 +135,7 @@ test('記憶と共有チャンネルの前置きも含めて1万文字以内に�
     assert.match(input, /memory/);
     assert.match(input, /現在のチャンネル/);
     assert.match(input, /今回の依頼/);
-  } finally { config.ai!.sharePublicChannelContext = false; }
+  } finally { config.ai!.shareChannelContext = false; }
 });
 
 const fakeSocket = () => {
@@ -249,11 +250,12 @@ test('生成中の呼び出し削除で投稿を止め、後続の依頼は新�
   release();
 });
 
-test('公開チャンネルの共有は設定時だけ行い、共有元が非公開になれば履歴を捨てる', async t => {
+test('非公開チャンネルも設定時は共有し、本人が読めなくなれば履歴を捨てる', async t => {
   const f = fixtures('888', undefined, '999'), g = fixtures('889', undefined, '999');
+  Object.defineProperty(f.channel, 'permissionsFor', { value: (principal: unknown) => ({ has: () => principal !== f.channel.guild.roles.everyone }), configurable: true });
   const requests: Array<{ messages: Array<{ role: string, content: string }> }> = [];
   t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => { requests.push(JSON.parse(String(init.body))); return response('shared answer'); });
-  config.ai!.sharePublicChannelContext = true;
+  config.ai!.shareChannelContext = true;
   try {
     await aiHandler(f.message('700', 'sharer'));
     await aiHandler(g.message('701', 'sharer'));
@@ -261,10 +263,11 @@ test('公開チャンネルの共有は設定時だけ行い、共有元が非�
     Object.defineProperty(f.channel, 'permissionsFor', { value: () => ({ has: () => false }), configurable: true });
     await aiHandler(g.message('702', 'sharer'));
     assert.equal(requests[2].messages.filter(m => m.role === 'user').length, 1);
-  } finally { config.ai!.sharePublicChannelContext = false; }
+  } finally { config.ai!.shareChannelContext = false; }
 });
 
 test('ツール境界で他の並列返信と新着発言をマージし、取得した過去画像も渡す', async t => {
+  resetModelMetaCache();
   const f = fixtures('1010');
   const old = f.message('799', 'old');
   old.attachments.set('img', { name: 'a.png', url: 'https://img.invalid/a.png', proxyURL: 'https://img.invalid/a.png' } as never);
@@ -272,10 +275,12 @@ test('ツール境界で他の並列返信と新着発言をマージし、取�
   const bot = f.message('802', 'other-bot', '別の並列返信');
   Object.defineProperty(bot.author, 'bot', { value: true });
   Object.defineProperty(f.channel, 'messages', { value: { fetch: async (options: unknown) => typeof options === 'string' ? old
-    : (options as { before?: string }).before ? new Map() : new Map([['801', newer], ['802', bot]]) }, configurable: true });
+    : (options as { before?: string }).before ? new Map<string, unknown>() : new Map([['801', newer], ['802', bot]]) }, configurable: true });
   t.mock.method(discord.channels, 'fetch', async () => f.channel);
   const requests: Array<{ messages: Array<{ role: string, content: unknown }> }> = [];
   t.mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+    if (String(url) === 'https://models.dev/api.json') return Response.json({ test: { api: 'https://llm.invalid/v1', models: { test: { id: 'test', modalities: { input: ['text', 'image'] } } } } });
+    if (String(url).endsWith('/models')) return Response.json({ data: [{ id: 'test' }] });
     if (String(url) === 'https://img.invalid/a.png') return new Response(new Uint8Array([1]), { headers: { 'Content-Type': 'image/png' } });
     requests.push(JSON.parse(String(init?.body)));
     if (requests.length === 1) return new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call', function: { name: 'fetch_message', arguments: JSON.stringify({ url: 'https://discord.com/channels/1010/1010/799' }) } }] } }] })}\n\ndata: [DONE]\n\n`);
@@ -301,4 +306,17 @@ test('送信中のtypingも完了してから最終返信を送り、後からty
   release();
   await pending;
   assert.ok(f.sent.at(-1)?.content.includes('finished'));
+});
+
+test('返信キャッシュはチャンネルごとに直近100呼び出しだけを保持する', async t => {
+  const a = fixtures('cache-a'), b = fixtures('cache-b');
+  t.mock.method(globalThis, 'fetch', async () => response('ok'));
+  await aiHandler(b.message('9900000', 'cache-user'));
+  for (let i = 0; i < 101; i++) await aiHandler(a.message(String(9910000 + i), 'cache-user'));
+  await deleteAIReplies('9910000', 'cache-a');
+  assert.equal(a.sent[0].deleted, false);
+  await deleteAIReplies('9910001', 'cache-a');
+  assert.equal(a.sent[1].deleted, true);
+  await deleteAIReplies('9900000', 'cache-b');
+  assert.equal(b.sent[0].deleted, true);
 });

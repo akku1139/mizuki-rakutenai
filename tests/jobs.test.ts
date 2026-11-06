@@ -3,7 +3,7 @@
 // バックグラウンドジョブ: Discord に何も送らずにエージェントループを回す。
 
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import { cancelJob, clearFinishedJobs, enqueueJob, getJob, jobSummary, listJobs, whenIdle } from '../src/jobs/mod.ts';
 
 // OpenAI SDK は鍵が空だとクライアントを作る時点で落ちるので、テスト用の鍵を置く
@@ -16,7 +16,7 @@ const sse = (...deltas: object[]) => new Response(
 );
 
 /** ジョブの実行 (OpenAI 互換 API だけをモックする) */
-const mockAgent = (t: { mock: { method: Function } }, respond: () => Response) => {
+const mockAgent = (t: Pick<TestContext, 'mock'>, respond: () => Response) => {
   const bodies: Array<{ messages: Array<{ role: string, content: unknown }> }> = [];
   t.mock.method(globalThis, 'fetch', async (url: string, init?: RequestInit) => {
     const target = String(url);

@@ -66,9 +66,9 @@ const fakeMessage = (id: string, authorId: string, content: string, embeds: obje
   content,
   createdAt: new Date(0),
   reference: null,
-  messageSnapshots: new Map(),
+  messageSnapshots: new Map<string, unknown>(),
   embeds: embeds.map(data => ({ data })),
-  attachments: new Map(),
+  attachments: new Map<string, unknown>(),
   member: null,
   author: { id: authorId, bot: false, displayName: authorId, username: authorId },
 }) as unknown as Message;
