@@ -52,6 +52,18 @@ export interface Config {
     contextWindowTokens?: number;
     readabilityEndpoint?: string | null;
     searchEndpoint?: string | null;
+    /** Kev互換 System One API。未設定ならメンション時だけ応答する */
+    participation?: { endpoint: string, channels: string[], model?: string, threshold?: number, cooldownMs?: number };
+    /** 全員が読める同一サーバー内のチャンネルで、本人の会話履歴を共有する (既定 false) */
+    sharePublicChannelContext?: boolean;
+  };
+  memorySite?: {
+    port?: number;
+    origin: string;
+    guilds: Record<string, 'off' | 'members' | 'public'>;
+    clientId?: string;
+    clientSecret?: string;
+    sessionSecret?: string;
   };
   miq?: {
     token?: string | null;

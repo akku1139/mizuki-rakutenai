@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Message, OmitPartialGroupDMChannel } from 'discord.js';
@@ -68,10 +69,10 @@ test('history stops at the length budget, which includes the prefix, but the tri
   for (const block of [full, withPrefix]) {
     assert.ok(block.trimEnd().endsWith('question'));
   }
-  // Everything but the trigger fits in 7000 characters, less the prefix
+  // Everything but the trigger fits in 10,000 characters, less the prefix
   const historyLength = (block: string) => block.slice(0, block.lastIndexOf('[99]')).length;
-  assert.ok(historyLength(full) <= 7000);
-  assert.ok(historyLength(withPrefix) <= 7000 - 3000);
+  assert.ok(historyLength(full) <= 10_000);
+  assert.ok(historyLength(withPrefix) <= 10_000 - 3000);
   assert.ok(lines(withPrefix).length < lines(full).length);
   assert.ok(lines(full).length < history.length + 1);
 });
@@ -80,7 +81,26 @@ test('replied-to messages already in the history are listed only once', () => {
   const replied = fake('1', 'alice', 'look');
   const block = buildContextBlock(fake('9', 'carol', 'what?', { replyTo: '1' }), [replied], [], 0, [replied]);
   assert.deepEqual(lines(block), [
+    '[System] 返信先のメッセージ:',
     '[1] T | alice-display (alice, alice): look',
+    '[System] ここから直近のメッセージ:',
     '[9] (reply to 1) T | carol-display (carol, carol): what?',
   ]);
+});
+
+test('予算を使い切るときは古い発言を落として最新の発言を残す', () => {
+  const history = Array.from({ length: 40 }, (_, i) => fake(String(i + 1), `user${i}`, `${i}:` + 'x'.repeat(500)));
+  const block = buildContextBlock(fake('99', 'carol', 'question'), history, [], 0);
+  assert.ok(!block.includes('[1]'));
+  assert.ok(block.includes('[40]'));
+  assert.ok(block.length <= 10_000);
+});
+
+test('履歴の古い側にある返信先も優先し、見出しを含め予算に収める', () => {
+  const replied = fake('1', 'alice', '返信先の本文');
+  const history = [replied, ...Array.from({ length: 30 }, (_, i) => fake(String(i + 2), `u${i}`, 'x'.repeat(500)))];
+  const block = buildContextBlock(fake('99', 'carol', 'question'), history, [], 0, [replied]);
+  assert.equal(block.split('返信先の本文').length, 2);
+  assert.ok(block.includes('[31]'));
+  assert.ok(block.length <= 10_000);
 });

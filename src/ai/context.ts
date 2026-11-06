@@ -6,7 +6,7 @@ import type { Message, OmitPartialGroupDMChannel, Snowflake } from 'discord.js';
 import { describeMessage } from './embeds.ts';
 
 /** Upper bound of the context block, excluding the system prompt prefix. */
-const MAX_CONTEXT_LEN = 7000;
+const MAX_CONTEXT_LEN = 10_000;
 
 const formatTime = (m: Message): string =>
   m.createdAt.toLocaleTimeString('ja-JP', {
@@ -42,7 +42,8 @@ export const buildContextBlock = (
   repliedMessages: Array<Message<boolean>> = [],
 ): string => {
   const contextLines: string[] = [];
-  let contextLength = prefixLength;
+  const triggerLine = formatLine(m, null);
+  let contextLength = prefixLength + triggerLine.length + 1;
 
   // システム行: 前回の自分のメッセージID（常に表示）
   if (lastIds.length > 0) {
@@ -51,13 +52,14 @@ export const buildContextBlock = (
     contextLength += sysLine.length + 1;
   }
 
-  // 返信先 (直近の履歴に無いものだけ)。前回の自分の発言より古くても載せる
-  const recentIds = new Set(recentMessages.map(msg => msg.id));
-  const replied = repliedMessages.filter(msg => msg.id !== m.id && !recentIds.has(msg.id));
+  // 返信先は履歴の予算から落ちないよう優先し、直近の欄からは重複を除く。
+  const replied = [...new Map(repliedMessages.filter(msg => msg.id !== m.id).map(msg => [msg.id, msg])).values()];
+  const repliedIds = new Set(replied.map(msg => msg.id));
   if (replied.length > 0) {
     const header = '[System] 返信先のメッセージ:';
+    const footer = '[System] ここから直近のメッセージ:';
     contextLines.push(header);
-    contextLength += header.length + 1;
+    contextLength += header.length + footer.length + 2;
     let repliedAuthorId: string | null = null;
     for (const msg of replied) {
       const line = formatLine(msg, repliedAuthorId);
@@ -66,22 +68,23 @@ export const buildContextBlock = (
       contextLength += line.length + 1;
       repliedAuthorId = msg.author.id;
     }
-    const footer = '[System] ここから直近のメッセージ:';
     contextLines.push(footer);
-    contextLength += footer.length + 1;
   }
 
   let lastAuthorId: string | null = null;
 
-  // 過去メッセージの整形
-  for (const msg of recentMessages) {
-    if (msg.id === m.id) continue;
-
-    const line = formatLine(msg, lastAuthorId);
-
+  // 新しいものから予算に収めてから、時系列順に整形する。
+  const selected: Message<boolean>[] = [];
+  for (const msg of [...recentMessages].reverse()) {
+    if (msg.id === m.id || repliedIds.has(msg.id)) continue;
+    const line = formatLine(msg, null);
     if (contextLength + line.length + 1 > MAX_CONTEXT_LEN) break;
-    contextLines.push(line);
+    selected.unshift(msg);
     contextLength += line.length + 1;
+  }
+  for (const msg of selected) {
+    const line = formatLine(msg, lastAuthorId);
+    contextLines.push(line);
     lastAuthorId = msg.author.id;
   }
 

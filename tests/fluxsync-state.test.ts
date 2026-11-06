@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -6,6 +7,7 @@ import { test } from 'node:test';
 
 // The maps are read from ./data when the module loads, so prepare a scratch working directory first
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mizuki-fluxsync-'));
+const originalCwd = process.cwd();
 process.chdir(dir);
 await fs.mkdir('data');
 const link = { whID: 'w1', whToken: 't1', targetChannelID: 'd1' };
@@ -13,7 +15,10 @@ await fs.writeFile('data/fluxersync_fluxer.json', JSON.stringify({ f1: link }));
 // fluxersync_discord.json is missing, as on the first start
 const { saveWhMap, whMapDiscord, whMapFluxer } = await import('../src/fluxsync/state.ts');
 
-test.after(() => fs.rm(dir, { recursive: true, force: true }));
+test.after(async () => {
+  process.chdir(originalCwd);
+  await fs.rm(dir, { recursive: true, force: true });
+});
 
 test('existing links are loaded and a missing file starts empty', () => {
   assert.deepEqual(whMapFluxer, { f1: link });

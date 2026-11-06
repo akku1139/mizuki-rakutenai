@@ -131,8 +131,18 @@ export const suppressEmbeds = (text: string): string =>
   text
     .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
     .map((part, index) => (index % 2 === 1 ? part : part
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, '[$1](<$2>)')
-      .replace(/(?<![<(])(https?:\/\/[^\s<>()\]]*[^\s<>()\].,;:!?、。])/g, '<$1>')))
+      .replace(/(?<!<)https?:\/\/[^\s<>\[\]`]+/g, raw => {
+        let url = raw;
+        let suffix = '';
+        let balance = [...url].reduce((n, c) => n + (c === '(' ? 1 : c === ')' ? -1 : 0), 0);
+        while (/[\].,;:!?、。*]$/.test(url) || (url.endsWith(')') && balance < 0)) {
+          const tail = url.slice(-1);
+          if (tail === ')') balance++;
+          suffix = tail + suffix;
+          url = url.slice(0, -1);
+        }
+        return `<${url}>${suffix}`;
+      })))
     .join('');
 
 export const isEffectivelyEmpty = (text: string): boolean => {
@@ -146,7 +156,7 @@ export const isEffectivelyEmpty = (text: string): boolean => {
 
 export const createFileFromUrl = async (url: string, fileName: string): Promise<File> => {
   // 1. URLからデータを取得
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`failed to fetch ${fileName}: ${response.status} ${response.statusText}`);
 
   // 2. ResponseをBlob（バイナリデータ）に変換

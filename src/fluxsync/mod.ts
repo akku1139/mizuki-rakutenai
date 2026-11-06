@@ -76,7 +76,7 @@ const onDiscordMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<
     },
     message_reference: repliedId === undefined ? undefined : { message_id: repliedId },
     username: `${m.member?.nickname ?? m.author.displayName}#Discord`,
-    avatar_url: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
+    avatar_url: m.member?.displayAvatarURL({ size: 1024 }) ?? m.author.displayAvatarURL({ size: 1024 }) ?? void 0,
     content: convertEmojis(m.content, guildOfChannel(fluxer, whInfo.targetChannelID)) + stickerLinks(m.stickers),
     embeds: m.embeds,
     attachments: Array.from(m.attachments.values()).map((a, i) => ({
@@ -144,7 +144,7 @@ const onFluxerMessage = async (m: OmitPartialGroupDMChannel<Message>): Promise<v
       parse: [], // とりあえずメンション無し
     },
     username: `${m.member?.nickname ?? m.author.displayName}#Fluxer`,
-    avatarURL: m.member?.avatarURL() ?? m.author.avatarURL() ?? void 0,
+    avatarURL: m.member?.displayAvatarURL({ size: 1024 }) ?? m.author.displayAvatarURL({ size: 1024 }) ?? void 0,
     content: (replyLine + convertEmojis(m.content, targetGuild) + stickerLinks(m.stickers)).slice(0, 2000),
     embeds: m.embeds,
     files: [...m.attachments.values()],

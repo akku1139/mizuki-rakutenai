@@ -176,3 +176,17 @@ test('Notion から取り込んだ事実は、新しいときだけ上書きす�
   assert.equal(older.updated, 0);
   assert.equal(memory.facts[0]!.text, '新しい説明', '古い方では上書きしない');
 });
+
+test('同じサーバーへの並列の記憶保存で事実が消えない', async () => {
+  await cleanup();
+  const [a, b] = await Promise.all([loadMemory(GUILD), loadMemory(GUILD)]);
+  assert.equal(a, b);
+  await Promise.all([
+    memoryTool.execute({ action: 'remember', text: '並列の記憶A' }, meta('u1')),
+    memoryTool.execute({ action: 'remember', text: '並列の記憶B' }, meta('u2')),
+  ]);
+  resetMemoryCache();
+  assert.equal((await loadMemory(GUILD)).facts.length, 2);
+  assert.equal((await loadMemory(OTHER_GUILD)).facts.length, 0);
+  await cleanup();
+});

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createFileFromUrl, getFileName, isEffectivelyEmpty, numberMessageLinks, splitLongString, suppressEmbeds } from '../src/utils.ts';
@@ -139,4 +140,13 @@ test('an explicit markdown link keeps its label and only gets <>', () => {
     suppressEmbeds(numberMessageLinks(`[この発言](${a}) と ${a}`)),
     `[この発言](<${a}>) と [\(1\)](<${a}>)`,
   );
+});
+
+test('URL内の括弧を残し、Markdownや文の外側の括弧だけを除く', () => {
+  const url = 'https://wiki.postmarketos.org/wiki/OnePlus_6T_(oneplus-fajita)';
+  assert.equal(suppressEmbeds(`[wiki](${url})`), `[wiki](<${url}>)`);
+  assert.equal(suppressEmbeds(`(${url}).`), `(<${url}>).`);
+  assert.equal(suppressEmbeds(`**[wiki](${url})**`), `**[wiki](<${url}>)**`);
+  assert.equal(suppressEmbeds(`<${url}>`), `<${url}>`);
+  assert.equal(suppressEmbeds(`[a](${url}),[b](https://example.com)`), `[a](<${url}>),[b](<https://example.com>)`);
 });

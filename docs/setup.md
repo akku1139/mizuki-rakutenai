@@ -81,7 +81,9 @@ pnpm start   # node --env-file=.env index.ts
 
 | ファイル | 内容 |
 |---|---|
-| `data/ai_prefs.json` | ユーザー ID ごとの AI プロバイダ設定 (`aimodel` コマンドで保存) |
+| `data/ai_prefs.json` | ユーザーIDごとのプロバイダ・モデル設定 (古いプロバイダ名だけの形式も読み込めます) |
+| `data/ai_replies.json` | 呼び出し元メッセージIDと分割した返信IDの対応 (削除の連動用) |
+| `data/memory/<guildId>.json` | サーバーごとの保存済みの記憶 |
 | `data/fluxersync_fluxer.json` | Fluxer チャンネル → Discord チャンネルの同期設定と webhook |
 | `data/fluxersync_discord.json` | Discord チャンネル → Fluxer チャンネルの同期設定と webhook |
 
@@ -95,3 +97,11 @@ pnpm start   # node --env-file=.env index.ts
 - 進行中の安価
 - チャンネル同期で使うメッセージ ID の対応表 (再起動前のメッセージへの返信とリアクションは同期されません)
 - コイン監視で集計中の出来高
+
+## 任意の追加設定
+
+- [自動参加](participation.md): ローカルKevの起動と、判定するチャンネルの指定
+- [記憶Wiki](memory-site.md): サーバー別の公開範囲とDiscord OAuth・HTTPSの設定
+- `ai.sharePublicChannelContext: true`: 全員が読めるチャンネル間で本人の履歴を共有 (既定 false)
+
+いずれも `data/config.json` で設定します。設定を足さなければ通常のメンション応答のままです。

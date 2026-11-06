@@ -33,13 +33,15 @@ export const setupAnka = (): void => {
     }
 
     let toSend = '';
+    const notifiedUsers = new Set<string>();
     ankas.forEach((a, k) => {
       if(a.count >= a.target) { ankas.delete(k); return; }
       if(m.channelId !== a.msg.channelId || a.target !== ++a.count) return;
       ankas.delete(k);
+      notifiedUsers.add(a.msg.author.id);
       toSend += `[>>${a.target}](${a.msg.url}) <@${a.msg.author.id}>\n`;
     });
-    if(toSend !== '') m.reply("安価されました\n" + toSend);
+    if(toSend !== '') m.reply({ content: "安価されました\n" + toSend, allowedMentions: { parse: [], users: [...notifiedUsers], repliedUser: true } });
 
     let i = 0;
     m.content.match(/>>\d+/g)?.forEach((a) => {

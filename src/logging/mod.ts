@@ -7,6 +7,7 @@ import { WebhookClient, type Client } from 'discord.js';
 import process from 'node:process';
 import { discord, fluxer } from '../clients.ts';
 import { config, get } from '../config.ts';
+import { quickLeaveNote } from './members.ts';
 
 interface LogConfig {
   client: Client,
@@ -46,6 +47,7 @@ const codeField = (text: string | null): string => '```md\n' + truncate(text ?? 
 const userMention = (u: { id: string } | null | undefined): string => u ? `<@${u.id}>` : 'unknown user';
 
 export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig): void => {
+  const joined = new Map<string, number>();
   const sendLog = async (embed: Record<string, unknown>): Promise<void> => {
     await webhook.send({ embeds: [embed] });
   };
@@ -59,7 +61,7 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
       },
       author: {
         name: m.author?.username ?? 'unknown user',
-        icon_url: m.member?.avatarURL() ?? m.author?.avatarURL() ?? undefined,
+        icon_url: m.member?.displayAvatarURL({ size: 1024 }) ?? m.author?.displayAvatarURL({ size: 1024 }) ?? undefined,
       },
       timestamp: new Date().toISOString(),
       color: COLORS.delete,
@@ -75,7 +77,7 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
       },
       author: {
         name: o.author?.username ?? 'unknown user',
-        icon_url: o.member?.avatarURL() ?? o.author?.avatarURL() ?? undefined,
+        icon_url: o.member?.displayAvatarURL({ size: 1024 }) ?? o.author?.displayAvatarURL({ size: 1024 }) ?? undefined,
       },
       timestamp: new Date().toISOString(),
       color: COLORS.edit,
@@ -96,6 +98,7 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
 
   client.on('guildMemberAdd', async m => {
     if (m.guild.id !== guildId) return;
+    joined.set(m.id, m.joinedTimestamp ?? Date.now());
     await sendLog({
       description: `:airplane_arriving: <@${m.user.id}> joined ${footerText}`,
       footer: {
@@ -103,7 +106,7 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
       },
       author: {
         name: `${m.user.displayName} (${m.user.username})`,
-        icon_url: m.user.avatarURL() ?? undefined,
+        icon_url: m.user.displayAvatarURL({ size: 1024 }) ?? undefined,
       },
       timestamp: new Date().toISOString(),
       color: COLORS.join,
@@ -112,14 +115,16 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
 
   client.on('guildMemberRemove', async m => {
     if (m.guild.id !== guildId) return;
+    const note = quickLeaveNote(m.joinedTimestamp ?? joined.get(m.id) ?? null);
+    joined.delete(m.id);
     await sendLog({
-      description: `:airplane_departure: <@${m.user.id}> left ${footerText}`,
+      description: `:airplane_departure: <@${m.user.id}> left ${footerText}${note}`,
       footer: {
         text: footerText,
       },
       author: {
         name: `${m.user.displayName} (${m.user.username})`,
-        icon_url: m.user.avatarURL() ?? undefined,
+        icon_url: m.user.displayAvatarURL({ size: 1024 }) ?? undefined,
       },
       timestamp: new Date().toISOString(),
       color: COLORS.leave,

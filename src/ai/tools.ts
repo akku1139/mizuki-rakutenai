@@ -28,6 +28,7 @@ export type AIToolResult = [true, unknown] | [false, { error: string }];
 export interface AIToolMeta {
   /** 呼び出し元のメッセージ (チャンネルやクライアントの解決に使用) */
   msg: OmitPartialGroupDMChannel<Message<boolean>>,
+  attachMessage?: (message: Message<boolean>) => Promise<void>,
 }
 
 export interface AITool {
@@ -113,7 +114,7 @@ const fetchMessage: AITool = {
     },
     required: ['url'],
   },
-  async execute({ url }, { msg }) {
+  async execute({ url }, { msg, attachMessage }) {
     try {
       const parsed = parseMessageUrl(String(url));
       if (!parsed?.messageId || !parsed.guildId) return [false, { error: 'URLのパース中にエラーが発生しました' }];
@@ -126,6 +127,7 @@ const fetchMessage: AITool = {
       const channelGuildId = (channel as { guildId?: string; guild?: { id?: string } }).guildId ?? (channel as { guild?: { id?: string } }).guild?.id;
       if (msg.guild && channelGuildId && channelGuildId !== msg.guild.id) return [false, { error: '別サーバーのチャンネルにはアクセスできません' }];
       const message = await channel.messages.fetch(parsed.messageId) as Message<boolean>;
+      await attachMessage?.(message);
       return [true, await messageToAISchema(message)];
     } catch (err) {
       return [false, errText(err)];
@@ -618,7 +620,7 @@ const fetchMessagesHistory: AITool = {
       limit: { type: 'number', description: '取得するメッセージ数 (1-100, 既定 30)' },
     },
   },
-  async execute({ channel: channelArg, anchor, direction, limit }, { msg }) {
+  async execute({ channel: channelArg, anchor, direction, limit }, { msg, attachMessage }) {
     try {
       let ch = msg.channel as unknown as HistoryChannel;
       const channelExplicit = channelArg !== undefined && channelArg !== '';
@@ -702,6 +704,7 @@ const fetchMessagesHistory: AITool = {
         id: m.id,
         ...(await messageToAISchema(m)),
       })));
+      if (attachMessage) for (const m of messages.values()) await attachMessage(m);
       items.sort((a: any, b: any) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
 
       return [true, {

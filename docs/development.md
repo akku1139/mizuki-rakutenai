@@ -68,6 +68,12 @@ pnpm typecheck   # tsc --noEmit
 | `tests/openai-compact.test.ts` | トークン数による auto-compact (要約・失敗時の破棄・切れ目・カタログ参照) |
 | `tests/model-meta.test.ts` | モデルカタログ (models.dev とプロバイダの /models) の解決 |
 | `tests/memory.test.ts` | 記憶の保存・重複排除・上限・想起の優先順と文字数・`memory` ツール |
+| `tests/agent.test.ts` | ツール往復の使用量、出力上限からの継続、中断・無進捗タイムアウト |
+| `tests/ai-handler.test.ts` | 初期化の競合、並列応答・文脈マージ、毎ターンの記憶・添付、切替・共有・clear・削除 |
+| `tests/replies.test.ts` | 再起動後の返信削除・失敗時の対応保持 |
+| `tests/participation.test.ts` | 自動参加の範囲・確率・返信先の検証 |
+| `tests/wiki.test.ts` | HTML・公開範囲・検索・年表・OAuth認証のHTTPフロー |
+| `tests/member-logging.test.ts` | 即抜けの境界時刻・不明な参加時刻 |
 | `tests/jobs.test.ts` | バックグラウンドジョブ (Discord に送らない実行・中断・記録) |
 | `tests/search-query.test.ts` | メッセージ検索のクエリ解釈と、公式検索 API / 自前の遡り |
 | `tests/mcp-result.test.ts` | MCP のツール結果 (resource / 画像 / structuredContent) のテキスト化 |

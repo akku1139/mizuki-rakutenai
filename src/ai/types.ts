@@ -76,6 +76,9 @@ export interface ChatSession {
     contents: ChatContents,
     /** ツール実行時に渡されるコンテキスト (呼び出し元メッセージなど) */
     meta?: unknown,
+    signal?: AbortSignal,
+    /** ツールの結果を積んだ後、次の生成の前に届いた発言を受け取る */
+    beforeRequest?: () => Promise<ChatContents>,
   }): AsyncGenerator<AIEvent>,
   /** 履歴をクライアント側で持つバックエンド (OpenAI互換) のみ実装 */
   setSystemPrompt?(text: string): void,
