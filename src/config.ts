@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { parseJson, ensureDataDirectory } from './utils.ts';
 
 /// 固定パスの data/config.json を読み込む。無ければ空オブジェクト (env にフォールバック)。
 
@@ -8,6 +9,8 @@ export interface OpenAIProfile {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  /** ユーザーがaimodelで選べるモデル。未設定ならモデルIDの変更は不可 */
+  allowedModels?: string[];
   /** コンテキストウィンドウ (トークン)。auto-compact の予算はこの 75% */
   contextWindowTokens?: number;
 }
@@ -34,6 +37,7 @@ export interface Config {
     logWebhookUrl?: string;
     botUserId?: string;
     guildId?: string;
+    quickLeaveChannelId?: string;
   };
   fluxer?: {
     token?: string;
@@ -41,6 +45,7 @@ export interface Config {
     logWebhookToken?: string;
     botUserId?: string;
     guildId?: string;
+    quickLeaveChannelId?: string;
     apiBase?: string;
     cdnBase?: string;
   };
@@ -52,6 +57,10 @@ export interface Config {
     contextWindowTokens?: number;
     readabilityEndpoint?: string | null;
     searchEndpoint?: string | null;
+    /** llama.cppのchat completions。未設定ならメンション時だけ応答する */
+    participation?: { endpoint: string, channels: string[], model?: string, threshold?: number, cooldownMs?: number };
+    /** 本人とbotが読める同一サーバーのチャンネルで履歴を共有する (既定 false) */
+    shareChannelContext?: boolean;
   };
   miq?: {
     token?: string | null;
@@ -79,7 +88,7 @@ const CONFIG_PATH = './data/config.json';
 
 const readConfig = (): Config => {
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) as Config;
+    return parseJson(fs.readFileSync(CONFIG_PATH, 'utf8')) as Config;
   } catch {
     return {};
   }
@@ -87,17 +96,25 @@ const readConfig = (): Config => {
 
 export const config: Config = readConfig();
 
-export const saveConfig = (): void => {
-  fs.writeFileSync('./data/config.json', JSON.stringify(config, null, 2));
+let writes = Promise.resolve();
+export const saveConfig = (): Promise<void> => {
+  const body = JSON.stringify(config, null, 2);
+  const write = writes.catch(() => {}).then(async () => {
+    await ensureDataDirectory();
+    await fs.promises.writeFile('./data/config.json.tmp', body);
+    await fs.promises.rename('./data/config.json.tmp', './data/config.json');
+  });
+  writes = write;
+  return write;
 };
 
 /** ネストしたキーを安全に取り出す。無ければ fallback */
-export const get = (obj: Config, path: string, fallback?: any): any => {
+export const get = <T = unknown>(obj: unknown, path: string, fallback?: T): T => {
   const parts = path.split('.');
-  let cur: any = obj;
+  let cur: unknown = obj;
   for (const p of parts) {
-    if (cur == null || typeof cur !== 'object') return fallback;
-    cur = cur[p];
+    if (cur == null || typeof cur !== 'object') return fallback as T;
+    cur = (cur as Record<string, unknown>)[p];
   }
-  return cur === undefined ? fallback : cur;
+  return (cur === undefined ? fallback : cur) as T;
 };

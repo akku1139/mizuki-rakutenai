@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -7,10 +8,14 @@ import { isProviderName, PROVIDERS } from '../src/ai/types.ts';
 
 // The settings file is relative to the working directory, so work in a scratch one
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mizuki-prefs-'));
+const originalCwd = process.cwd();
 process.chdir(dir);
-const { getUserProvider, loadPrefs, setUserProvider } = await import('../src/ai/prefs.ts');
+const { getUserModel, getUserProvider, loadPrefs, setUserProvider } = await import('../src/ai/prefs.ts');
 
-test.after(() => fs.rm(dir, { recursive: true, force: true }));
+test.after(async () => {
+  process.chdir(originalCwd);
+  await fs.rm(dir, { recursive: true, force: true });
+});
 
 test('isProviderName accepts only the known providers', () => {
   for (const p of PROVIDERS) assert.equal(isProviderName(p), true);
@@ -40,4 +45,13 @@ test('loading skips unknown providers and values that are not strings', async ()
   assert.equal(getUserProvider('u2'), 'rakutenai');
   assert.equal(getUserProvider('u3'), undefined);
   assert.equal(getUserProvider('u4'), undefined);
+});
+
+test('ユーザー別モデルは保存でき、並列更新も失われない', async () => {
+  await Promise.all([setUserProvider('model-user', 'openai', 'vendor/model:free'), setUserProvider('other-user', 'rakutenai')]);
+  await loadPrefs();
+  assert.equal(getUserModel('model-user'), 'vendor/model:free');
+  assert.equal(getUserProvider('other-user'), 'rakutenai');
+  await setUserProvider('model-user', 'rakutenai');
+  assert.equal(getUserModel('model-user'), undefined);
 });

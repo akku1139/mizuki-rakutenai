@@ -1,7 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { log, info, warn, error } from './log.ts';
+import { mkdir } from 'node:fs/promises';
+import type { GuildMember, User } from 'discord.js';
 
 /// Small platform-independent helpers.
+
+export const parseJson = (text: string): unknown => JSON.parse(text) as unknown;
+
+export const getDisplayAvatarUrl = (user: Pick<User, 'id' | 'avatarURL' | 'displayAvatarURL'>, member: Pick<GuildMember, 'avatarURL'> | null | undefined, fromFluxer = false): string => {
+  const options = { size: 1024, extension: 'webp' } as const;
+  return member?.avatarURL(options) ?? user.avatarURL(options)
+    ?? (fromFluxer ? `https://cdn.discordapp.com/embed/avatars/${Number(BigInt(user.id) % 6n)}.png` : user.displayAvatarURL(options));
+};
+
+export const ensureDataDirectory = async (directory = './data'): Promise<void> => {
+  await mkdir(directory, { recursive: true });
+};
+
+export const MESSAGE_CACHE_LIMIT = 5000;
+export const cacheMessage = <T>(cache: Map<string, T>, id: string, value: T, limit = MESSAGE_CACHE_LIMIT): void => {
+  cache.set(id, value);
+  if (cache.size > limit) cache.delete(cache.keys().next().value!);
+};
 
 /** 改行を優先して切る (コードブロックを考えない素朴な分割) */
 const splitPlain = (text: string, len: number): Array<string> => {
@@ -131,8 +151,18 @@ export const suppressEmbeds = (text: string): string =>
   text
     .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
     .map((part, index) => (index % 2 === 1 ? part : part
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s>)]+)\)/g, '[$1](<$2>)')
-      .replace(/(?<![<(])(https?:\/\/[^\s<>()\]]*[^\s<>()\].,;:!?、。])/g, '<$1>')))
+      .replace(/(?<!<)https?:\/\/[^\s<>\[\]`]+/g, raw => {
+        let url = raw;
+        let suffix = '';
+        let balance = [...url].reduce((n, c) => n + (c === '(' ? 1 : c === ')' ? -1 : 0), 0);
+        while (/[\].,;:!?、。*]$/.test(url) || (url.endsWith(')') && balance < 0)) {
+          const tail = url.slice(-1);
+          if (tail === ')') balance++;
+          suffix = tail + suffix;
+          url = url.slice(0, -1);
+        }
+        return `<${url}>${suffix}`;
+      })))
     .join('');
 
 export const isEffectivelyEmpty = (text: string): boolean => {
@@ -144,9 +174,10 @@ export const isEffectivelyEmpty = (text: string): boolean => {
   return cleanedText.length === 0;
 };
 
-export const createFileFromUrl = async (url: string, fileName: string): Promise<File> => {
+export const createFileFromUrl = async (url: string, fileName: string, signal?: AbortSignal): Promise<File> => {
   // 1. URLからデータを取得
-  const response = await fetch(url);
+  const timeout = AbortSignal.timeout(30_000);
+  const response = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
   if (!response.ok) throw new Error(`failed to fetch ${fileName}: ${response.status} ${response.statusText}`);
 
   // 2. ResponseをBlob（バイナリデータ）に変換

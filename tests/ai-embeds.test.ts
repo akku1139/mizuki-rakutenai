@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { APIEmbed, Message, OmitPartialGroupDMChannel } from 'discord.js';
@@ -65,9 +66,9 @@ const fakeMessage = (id: string, authorId: string, content: string, embeds: obje
   content,
   createdAt: new Date(0),
   reference: null,
-  messageSnapshots: new Map(),
+  messageSnapshots: new Map<string, unknown>(),
   embeds: embeds.map(data => ({ data })),
-  attachments: new Map(),
+  attachments: new Map<string, unknown>(),
   member: null,
   author: { id: authorId, bot: false, displayName: authorId, username: authorId },
 }) as unknown as Message;
@@ -80,8 +81,8 @@ test('replied-to messages come first with their embeds, even when older than the
   assert.deepEqual(lines.map(l => l.replace(/\d\d:\d\d:\d\d/, 'T')), [
     '[System] 返信先のメッセージ:',
     '[1] T | alice (alice, alice): see this [embed: News / (画像)]',
-    '[System] ここから直近のメッセージ:',
     '[5] T | bob (bob, bob): hi',
+    '[System] ここから直近のメッセージ:',
     '[9] T | carol (carol, carol): what is it?',
   ]);
 });

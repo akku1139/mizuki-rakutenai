@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { parseJson } from '../utils.ts';
 
 /// LAN 向けの読み取り専用管理パネル (Node 組み込み http)。
 
 import http from 'node:http';
+import { ChannelType, type ThreadChannel } from 'discord.js';
+import type { McpServerConfig } from '../config.ts';
 import fs from 'node:fs';
 import { config, get, saveConfig } from '../config.ts';
 import { getLogEntries, log } from '../log.ts';
@@ -15,7 +18,7 @@ import { discord, fluxer } from '../clients.ts';
 import { getMcpStatus, applyMcpConfigs, connectMcpServer, startMcpOAuth } from '../ai/mcp-registry.ts';
 
 const PORT = get(config, 'admin.port', 8080);
-const TOKEN = get(config, 'admin.token', null);
+const TOKEN = get<string | null>(config, 'admin.token', null);
 
 const UI = fs.readFileSync(new URL('./ui.html', import.meta.url), 'utf8');
 
@@ -66,20 +69,20 @@ export const setupAdmin = (): void => {
   }
   if (parsed.pathname === '/api/mcp' && req.method === 'POST') {
     let body = '';
-    req.on('data', c => body += c);
+    req.on('data', (c: Buffer) => body += c);
     req.on('end', async () => {
       try {
-        const cfg = JSON.parse(body);
+        const cfg = parseJson(body) as McpServerConfig;
         config.mcpServers = config.mcpServers ?? [];
         const idx = config.mcpServers.findIndex(c => c.name === cfg.name);
         if (idx >= 0) config.mcpServers[idx] = cfg;
         else config.mcpServers.push(cfg);
-        saveConfig();
+        await saveConfig();
         applyMcpConfigs(config.mcpServers);
         try { await connectMcpServer(cfg.name); } catch {}
         json(res, 200, { ok: true });
-      } catch (e: any) {
-        json(res, 400, { error: e?.message ?? String(e) });
+      } catch (e) {
+        json(res, 400, { error: e instanceof Error ? e.message : String(e) });
       }
     });
     return;
@@ -88,35 +91,35 @@ export const setupAdmin = (): void => {
     const name = parsed.searchParams.get('name');
     if (!name) { json(res, 400, { error: 'name required' }); return; }
     config.mcpServers = (config.mcpServers ?? []).filter(c => c.name !== name);
-    saveConfig();
+    await saveConfig();
     applyMcpConfigs(config.mcpServers);
     json(res, 200, { ok: true });
     return;
   }
   if (parsed.pathname === '/api/mcp/oauth' && req.method === 'POST') {
     let body = '';
-    req.on('data', c => body += c);
+    req.on('data', (c: Buffer) => body += c);
     req.on('end', async () => {
       try {
-        const { name } = JSON.parse(body);
+        const { name } = parseJson(body) as { name: string };
         const r = await startMcpOAuth(name);
         json(res, 200, r);
-      } catch (e: any) {
-        json(res, 400, { error: e?.message ?? String(e) });
+      } catch (e) {
+        json(res, 400, { error: e instanceof Error ? e.message : String(e) });
       }
     });
     return;
   }
   if (parsed.pathname === '/api/mcp/connect' && req.method === 'POST') {
     let body = '';
-    req.on('data', c => body += c);
+    req.on('data', (c: Buffer) => body += c);
     req.on('end', async () => {
       try {
-        const { name } = JSON.parse(body);
+        const { name } = parseJson(body) as { name: string };
         await connectMcpServer(name);
         json(res, 200, { ok: true });
-      } catch (e: any) {
-        json(res, 400, { error: e?.message ?? String(e) });
+      } catch (e) {
+        json(res, 400, { error: e instanceof Error ? e.message : String(e) });
       }
     });
     return;
@@ -125,29 +128,32 @@ export const setupAdmin = (): void => {
     const out: Array<{ id: string, name: string, platform: string, position?: number, blacklisted: boolean }> = [];
     for (const [client, platform] of [[discord, 'discord'], [fluxer, 'fluxer']] as const) {
       for (const g of client.guilds.cache.values()) {
-        const cats = new Map((g.channels.cache.filter((c: any) => c.type === 4).map((c: any) => [c.id, c.name])));
+        const cats = new Map((g.channels.cache.filter(c => c.type === ChannelType.GuildCategory).map(c => [c.id, c.name])));
         const channels = [...g.channels.cache.values()]
-          .filter((c: any) => c.isTextBased && c.isTextBased())
-          .sort((a: any, b: any) => (a.rawPosition ?? a.position ?? 0) - (b.rawPosition ?? b.position ?? 0));
+          .filter(c => c.isTextBased() && !c.isThread())
+          .sort((a, b) => ('rawPosition' in a ? a.rawPosition : 0) - ('rawPosition' in b ? b.rawPosition : 0));
         for (const c of channels) {
           const cat = c.parentId ? cats.get(c.parentId) : undefined;
-          out.push({ id: c.id, name: `${g.name} / ${cat ? cat + ' / ' : ''}${c.name}`, platform, position: (c as any).rawPosition ?? (c as any).position ?? 0, blacklisted: (config.blacklistedChannels ?? []).includes(c.id) || (!!c.parentId && (config.blacklistedChannels ?? []).includes(c.parentId)) });
+          out.push({ id: c.id, name: `${g.name} / ${cat ? cat + ' / ' : ''}${c.name}`, platform, position: ('rawPosition' in c ? c.rawPosition : 0), blacklisted: (config.blacklistedChannels ?? []).includes(c.id) || (!!c.parentId && (config.blacklistedChannels ?? []).includes(c.parentId)) });
         }
-        let threads: any[] = [];
+        let threads: ThreadChannel[] = [];
         try {
-          const fetched = await (g as any).threads?.fetchActive?.();
-          threads = fetched ? [...fetched.threads.values()] : [...((g as any).threads?.cache?.values?.() ?? [])];
+          const fetched = await g.channels.fetchActiveThreads();
+          threads = fetched ? [...fetched.threads.values()] : [...g.channels.cache.filter(c => c.isThread()).values()];
         } catch {
-          threads = [...((g as any).threads?.cache?.values?.() ?? [])];
+          threads = [...g.channels.cache.filter(c => c.isThread()).values()];
         }
         for (const t of threads) {
           let parent = t.parent;
           if (!parent && t.parentId) {
-            try { parent = await client.channels.fetch(t.parentId); } catch { parent = null; }
+            try {
+              const fetched = await client.channels.fetch(t.parentId);
+              if (fetched?.type === ChannelType.GuildText || fetched?.type === ChannelType.GuildAnnouncement || fetched?.type === ChannelType.GuildForum || fetched?.type === ChannelType.GuildMedia) parent = fetched;
+            } catch { parent = null; }
           }
           const cat = parent?.parentId ? cats.get(parent.parentId) : undefined;
           const parentName = parent?.name ?? (t.parentId ? t.parentId : '?');
-          out.push({ id: t.id, name: `${g.name} / ${cat ? cat + ' / ' : ''}#${parentName} / ${t.name}`, platform, position: (t as any).rawPosition ?? 0, blacklisted: (config.blacklistedChannels ?? []).includes(t.id) || (!!t.parentId && (config.blacklistedChannels ?? []).includes(t.parentId)) });
+          out.push({ id: t.id, name: `${g.name} / ${cat ? cat + ' / ' : ''}#${parentName} / ${t.name}`, platform, position: 0, blacklisted: (config.blacklistedChannels ?? []).includes(t.id) || (!!t.parentId && (config.blacklistedChannels ?? []).includes(t.parentId)) });
         }
       }
     }
@@ -156,15 +162,15 @@ export const setupAdmin = (): void => {
   }
   if (parsed.pathname === '/api/blacklist' && req.method === 'POST') {
     let body = '';
-    req.on('data', c => body += c);
-    req.on('end', () => {
+    req.on('data', (c: Buffer) => body += c);
+    req.on('end', async () => {
       try {
-        const { channelId, blacklisted } = JSON.parse(body);
+        const { channelId, blacklisted } = parseJson(body) as { channelId: string, blacklisted: boolean };
         // スレッドの場合は親チャンネルIDを保存する
         let targetId = channelId;
         for (const client of [discord, fluxer]) {
           for (const g of client.guilds.cache.values()) {
-            const ch = g.channels.cache.get(channelId) ?? (g as any).threads?.cache?.get?.(channelId);
+            const ch = g.channels.cache.get(channelId);
             if (ch && 'parentId' in ch && ch.parentId) { targetId = ch.parentId; break; }
           }
         }
@@ -174,10 +180,10 @@ export const setupAdmin = (): void => {
         } else {
           config.blacklistedChannels = config.blacklistedChannels.filter(x => x !== targetId);
         }
-        saveConfig();
+        await saveConfig();
         json(res, 200, { ok: true });
-      } catch (e: any) {
-        json(res, 400, { error: e?.message ?? String(e) });
+      } catch (e) {
+        json(res, 400, { error: e instanceof Error ? e.message : String(e) });
       }
     });
     return;
@@ -195,27 +201,27 @@ export const setupAdmin = (): void => {
   }
   if (parsed.pathname === '/api/jobs' && req.method === 'POST') {
     let body = '';
-    req.on('data', c => body += c);
-    req.on('end', () => {
+    req.on('data', (c: Buffer) => body += c);
+    req.on('end', async () => {
       try {
-        const request = JSON.parse(body) as Parameters<typeof enqueueJob>[0];
+        const request = parseJson(body) as Parameters<typeof enqueueJob>[0];
         json(res, 200, enqueueJob(request));
-      } catch (e: any) {
-        json(res, 400, { error: e?.message ?? String(e) });
+      } catch (e) {
+        json(res, 400, { error: e instanceof Error ? e.message : String(e) });
       }
     });
     return;
   }
   if (parsed.pathname === '/api/jobs/cancel' && req.method === 'POST') {
     let body = '';
-    req.on('data', c => body += c);
-    req.on('end', () => {
+    req.on('data', (c: Buffer) => body += c);
+    req.on('end', async () => {
       try {
-        const { id } = JSON.parse(body) as { id?: string };
+        const { id } = parseJson(body) as { id?: string };
         if (typeof id !== 'string') { json(res, 400, { error: 'id required' }); return; }
         json(res, 200, { ok: cancelJob(id) });
-      } catch (e: any) {
-        json(res, 400, { error: e?.message ?? String(e) });
+      } catch (e) {
+        json(res, 400, { error: e instanceof Error ? e.message : String(e) });
       }
     });
     return;

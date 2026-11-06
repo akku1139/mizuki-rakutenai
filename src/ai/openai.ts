@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { parseJson } from '../utils.ts';
 import { log, info, warn, error } from '../log.ts';
 
 /// OpenAI互換 (/v1/chat/completions) API を ChatSession インターフェースに適合させるアダプタ。
@@ -98,7 +99,7 @@ const textFromFile = (file: ChatFile): string | undefined => {
   const dataUrl = /^data:([^;,]+);base64,(.*)$/s.exec(file.fileUrl);
   if (!dataUrl || !/^text\/|^application\/(?:json|xml|x-yaml|yaml|csv)$/i.test(
     dataUrl[1]!,
-  )) return undefined;
+  ) && !/\.(?:txt|md|csv|json|jsonl|yaml|yml|log)$/i.test(file.fileName)) return undefined;
   const text = Buffer.from(dataUrl[2]!, 'base64').toString('utf8');
   return text.length > MAX_TEXT_ATTACHMENT_CHARS
     ? `${text.slice(0, MAX_TEXT_ATTACHMENT_CHARS)}\n[添付ファイルの残りは省略されました]`
@@ -112,6 +113,7 @@ export class OpenAICompatChat implements ChatSession {
   readonly #config: OpenAICompatConfig;
   readonly #client: OpenAI;
   #systemPrompt: string = '';
+  #serverContext = '';
   #history: History = [];
   /** 今回の発言を始める前の履歴。失敗や空応答のときはここまで戻す */
   #historyBeforeTurn: History = [];
@@ -128,6 +130,7 @@ export class OpenAICompatChat implements ChatSession {
   #compactedAtLen = 0;
   /** モデルカタログから引いたコンテキストウィンドウ (解決は 1 回だけ) */
   #catalogWindowTokens: Promise<number | undefined> | undefined;
+  #imageSupport: Promise<boolean> | undefined;
   /** 直近に使ったウィンドウの出どころ (変わったときだけログに出す) */
   #windowSource: 'config' | 'catalog' | 'default' | undefined;
   /**
@@ -173,7 +176,7 @@ export class OpenAICompatChat implements ChatSession {
 
   /** サーバー/チャンネルの文脈をシステムプロンプトに追記する */
   setServerContext(guildName: string, channelName: string): void {
-    this.#systemPrompt += `\nあなたが参加してるサーバーは "${guildName}"、チャンネルは "${channelName}" です。`;
+    this.#serverContext = `\nあなたが参加してるサーバーは "${guildName}"、チャンネルは "${channelName}" です。`;
   }
 
   /**
@@ -208,10 +211,25 @@ export class OpenAICompatChat implements ChatSession {
     };
   }
 
+  async #filePart(file: ChatFile): Promise<OpenAI.Chat.ChatCompletionContentPart> {
+    if (file.isImage) {
+      this.#imageSupport ??= fetchModelListCached(this.#config.baseUrl, this.#config.apiKey)
+        .then(list => list.find(m => m.id === this.#config.model)?.inputModalities?.includes('image') === true);
+      if (await this.#imageSupport) return { type: 'image_url', image_url: { url: file.fileUrl } };
+      return { type: 'text', text: `[添付画像「${file.fileName}」はモデルの画像対応が確認できないため省略しました]` };
+    }
+    const text = textFromFile(file);
+    return { type: 'text', text: text === undefined
+      ? `[添付ファイル「${file.fileName}」は、このAPI経路では読み取れない形式です]`
+      : `[添付ファイル: ${file.fileName}]\n${text}` };
+  }
+
   async *sendMessage(message: {
     mode?: 'USER_INPUT' | 'DEEP_THINK' | 'AI_READ',
     contents: ChatContents,
     meta?: unknown,
+    signal?: AbortSignal,
+    beforeRequest?: () => Promise<ChatContents>,
   }): AsyncGenerator<AIEvent> {
     const userText = message.contents
       .filter((c): c is { type: 'text', text: string } => c.type === 'text')
@@ -225,38 +243,42 @@ export class OpenAICompatChat implements ChatSession {
       ? userText
       : [
           ...(userText ? [{ type: 'text' as const, text: userText }] : []),
-          ...files.map((file): OpenAI.Chat.ChatCompletionContentPart => {
-            if (file.isImage) {
-              return { type: 'image_url', image_url: { url: file.fileUrl } };
-            }
-            const text = textFromFile(file);
-            return {
-              type: 'text',
-              text: text === undefined
-                ? `[添付ファイル「${file.fileName}」は、このAPI経路では読み取れない形式です]`
-                : `[添付ファイル: ${file.fileName}]\n${text}`,
-            };
-          }),
+          ...await Promise.all(files.map(file => this.#filePart(file))),
         ];
 
-    yield* this.#agentLoop(userContent, message.meta);
+    yield* this.#agentLoop(userContent, message.meta, message.signal, message.beforeRequest);
   }
 
   /** ツール実行 → 再生成のループ */
-  async *#agentLoop(userContent: string | Array<OpenAI.Chat.ChatCompletionContentPart>, meta: unknown): AsyncGenerator<AIEvent> {
+  async *#agentLoop(userContent: string | Array<OpenAI.Chat.ChatCompletionContentPart>, meta: unknown, signal?: AbortSignal, beforeRequest?: () => Promise<ChatContents>): AsyncGenerator<AIEvent> {
     this.#historyBeforeTurn = [...this.#history];
     this.#history.push({ role: 'user', content: userContent });
 
+    let textContinuations = 0;
     while (true) {
+      signal?.throwIfAborted();
       let sawToolCall = false;
+      let truncated = false;
 
-      for await (const ev of this.#complete(meta)) {
+      for await (const ev of this.#complete(meta, signal)) {
         if (ev.type === 'tool-call-detail') sawToolCall = true;
+        if (ev.type === 'notification' && ev.data !== null && typeof ev.data === 'object' && 'finishReason' in ev.data && ev.data.finishReason === 'length') truncated = true;
         yield ev;
       }
 
-      // ツール呼び出しがなければ完了
-      if (!sawToolCall) return;
+      // 出力上限で途切れた本文だけを継続する。ツール往復には回数制限を設けない。
+      if (truncated && textContinuations++ < 3) {
+        this.#history.push({ role: 'user', content: '出力が上限で途切れました。重複せず続きから完成させてください。' });
+      } else if (!sawToolCall) return;
+      const buffered = await beforeRequest?.();
+      if (buffered?.length) {
+        const parts: OpenAI.Chat.ChatCompletionContentPart[] = [];
+        for (const c of buffered) {
+          if (c.type === 'text') parts.push({ type: 'text', text: c.text });
+          else parts.push(await this.#filePart(c.file));
+        }
+        this.#history.push({ role: 'user', content: parts });
+      }
     }
   }
 
@@ -527,12 +549,12 @@ export class OpenAICompatChat implements ChatSession {
   }
 
   /** 1回分の chat/completions をストリーミング実行し、必要ならツールを実行する */
-  async *#complete(meta: unknown): AsyncGenerator<AIEvent> {
+  async *#complete(meta: unknown, signal?: AbortSignal): AsyncGenerator<AIEvent> {
     // ツールを大量に呼ぶターンは 1 回で窓を食い潰すので、毎リクエストの前に見る
     await this.#maybeCompact();
 
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = this.#sanitize([
-      ...(this.#systemPrompt ? [{ role: 'system' as const, content: this.#systemPrompt }] : []),
+      ...(this.#systemPrompt || this.#serverContext ? [{ role: 'system' as const, content: this.#systemPrompt + this.#serverContext }] : []),
       ...this.#history.map(m => this.#withReasoning(m)),
     ]);
 
@@ -549,7 +571,7 @@ export class OpenAICompatChat implements ChatSession {
         stream: true,
         stream_options: { include_usage: true },
         ...(definitions.length > 0 ? { tools: definitions as unknown as OpenAI.Chat.ChatCompletionTool[] } : {}),
-      }, { timeout: 120_000 }) as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
+      }, { timeout: 120_000, signal }) as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
     } catch (err) {
       // 失敗時は履歴を汚さない
       this.#history = this.#historyBeforeTurn;
@@ -649,6 +671,7 @@ export class OpenAICompatChat implements ChatSession {
     const calls = [...toolCalls.entries()].sort((a, b) => a[0] - b[0])
       .map(([, v]) => ({ ...v, id: v.id || `call_${crypto.randomUUID()}` }));
 
+    if (usageEvent !== undefined) yield usageEvent;
     if (calls.length > 0) {
       // アシスタントのツール呼び出しを履歴に積む
       this.#history.push({
@@ -663,9 +686,11 @@ export class OpenAICompatChat implements ChatSession {
       });
 
       for (const c of calls) {
+        signal?.throwIfAborted();
         let args: Record<string, unknown> = {};
         try {
-          args = JSON.parse(c.arguments || '{}');
+          const parsed: unknown = parseJson(c.arguments || '{}');
+          if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) args = parsed as Record<string, unknown>;
         } catch {
           // 引数が壊れている場合は空で実行
         }
@@ -719,7 +744,7 @@ export class OpenAICompatChat implements ChatSession {
       if (!ranTool) this.#history = this.#historyBeforeTurn;
     }
 
-    if (usageEvent !== undefined) yield usageEvent;
+    if (finishReason === 'length' && text.trim() !== '') yield { type: 'notification', data: { finishReason } };
     yield { type: 'done', messageIds: [this.id] };
   }
 }

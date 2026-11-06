@@ -4,7 +4,7 @@
 // teapot の model-meta.ts の移植なので、判定の順序 (ホスト → パス) もそのまま。
 
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import { contextLengthFor, fetchModelList, providerFor, resetModelMetaCache } from '../src/ai/model-meta.ts';
 
 const DB = {
@@ -25,7 +25,7 @@ const DB = {
 
 /** models.dev と、プロバイダの /models を返すモック */
 const mockCatalog = (
-  t: { mock: { method: Function } },
+  t: Pick<TestContext, 'mock'>,
   upstream: (url: string) => Response | undefined,
 ) => {
   const urls: string[] = [];

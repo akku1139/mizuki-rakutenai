@@ -4,13 +4,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@jsr/evex__rakutenai@0.1.19': e16c50851fd79236a128eac3c3137bd5d4093831e44a23cefef34de185813d22
+
 importers:
 
   .:
     dependencies:
       '@evex/rakutenai':
         specifier: jsr:^0.1.19
-        version: '@jsr/evex__rakutenai@0.1.19'
+        version: '@jsr/evex__rakutenai@0.1.19(patch_hash=e16c50851fd79236a128eac3c3137bd5d4093831e44a23cefef34de185813d22)'
       '@makeitaquote/openmiq':
         specifier: ^1.2.0
         version: 1.2.0
@@ -457,7 +460,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@jsr/evex__rakutenai@0.1.19':
+  '@jsr/evex__rakutenai@0.1.19(patch_hash=e16c50851fd79236a128eac3c3137bd5d4093831e44a23cefef34de185813d22)':
     dependencies:
       '@ai-sdk/provider': 4.0.10
 

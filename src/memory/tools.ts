@@ -67,7 +67,7 @@ export const memoryTool: AITool = {
     if (action === 'remember') {
       // 1 件でも配列でも受ける (モデルはまとめて保存したほうが失敗しにくい)
       const items = Array.isArray(args['facts'])
-        ? args['facts'].filter((f): f is Record<string, unknown> => f !== null && typeof f === 'object')
+        ? args['facts'].filter((f: unknown): f is Record<string, unknown> => f !== null && typeof f === 'object')
         : [];
       const single = typeof args['text'] === 'string' && args['text'].trim() !== ''
         ? [{ text: args['text'], ...(args['scope'] !== undefined ? { scope: args['scope'] } : {}), ...(args['subject'] !== undefined ? { subject: args['subject'] } : {}), ...(args['tags'] !== undefined ? { tags: args['tags'] } : {}) }]

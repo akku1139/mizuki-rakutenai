@@ -34,6 +34,7 @@ pnpm start   # node --env-file=.env index.ts
 
 - [docs/setup.md](docs/setup.md): 必要なもの、環境変数、起動、`data/` に保存されるもの
 - [docs/commands.md](docs/commands.md): コマンド一覧
+- [docs/participation.md](docs/participation.md): llama.cppとGGUFモデルによる自動参加
 - [docs/ai.md](docs/ai.md): AI アシスタントの仕組み (プロバイダ、文脈、ツール、429 対策)
 - [docs/fluxsync.md](docs/fluxsync.md): Discord ⇔ Fluxer チャンネル同期
 - [docs/admin.md](docs/admin.md): 管理パネルとバックグラウンドジョブ

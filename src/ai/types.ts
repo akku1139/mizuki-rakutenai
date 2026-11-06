@@ -14,7 +14,7 @@ export type AIEvent =
       outputTokens: number,
       cachedInputTokens?: number,
     } }
-  | { type: 'notification', data: any }
+  | { type: 'notification', data: unknown }
   | { type: 'disconnected' }
   | { type: 'tool-call', data: Array<{
       contentType: 'TEXT' | 'SUMMARY_TEXT',
@@ -70,12 +70,17 @@ export interface ChatSession {
   /** ログ表示用のラベル (例: "rakutenai", "openai/gpt-4o-mini") */
   readonly label: string,
   readonly id: string,
+  /** 接続を持つプロバイダの解放。既に実行された上流の処理は取り消さない */
+  close?(): void,
   uploadFile(opts: { file: File, isImage?: boolean }): Promise<ChatFile>,
   sendMessage(message: {
     mode?: 'USER_INPUT' | 'DEEP_THINK' | 'AI_READ',
     contents: ChatContents,
     /** ツール実行時に渡されるコンテキスト (呼び出し元メッセージなど) */
     meta?: unknown,
+    signal?: AbortSignal,
+    /** ツールの結果を積んだ後、次の生成の前に届いた発言を受け取る */
+    beforeRequest?: () => Promise<ChatContents>,
   }): AsyncGenerator<AIEvent>,
   /** 履歴をクライアント側で持つバックエンド (OpenAI互換) のみ実装 */
   setSystemPrompt?(text: string): void,

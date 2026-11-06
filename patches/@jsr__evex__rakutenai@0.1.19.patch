@@ -1,0 +1,28 @@
+diff --git a/chat.js b/chat.js
+index 471c924fe7ded16932b87dabe1282aaa3a49bd7b..0f9a74912e20cf8edb18cdf11cd41b6494f7473b 100644
+--- a/chat.js
++++ b/chat.js
+@@ -311,8 +311,7 @@ _computedKey = Symbol.dispose;
+     }
+   }
+   [_computedKey]() {
+-    this.#stream.cancel();
+-    this.#ws.close();
++    void this.#streamReader.cancel().catch(()=>{});
+   }
+   close() {
+     this[Symbol.dispose]();
+diff --git a/chat.ts b/chat.ts
+index ed8f7ea2f754c724185dfd90dd199b2d50282492..c391d908eddecfc6c6523176b8664648900b2a68 100644
+--- a/chat.ts
++++ b/chat.ts
+@@ -394,8 +394,7 @@ export class Thread {
+     }
+   }
+   [Symbol.dispose]() {
+-    this.#stream.cancel()
+-    this.#ws.close()
++    void this.#streamReader.cancel().catch(() => {})
+   }
+   close() {
+     this[Symbol.dispose]()

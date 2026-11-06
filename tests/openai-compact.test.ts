@@ -4,7 +4,7 @@
 // 古い方を要約 1 通に置き換え、直近は生のまま残す。
 
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import { OpenAICompatChat } from '../src/ai/openai.ts';
 import { resetModelMetaCache } from '../src/ai/model-meta.ts';
 import type { AIEvent, ToolSpec } from '../src/ai/types.ts';
@@ -27,7 +27,7 @@ const completion = (text: string) => new Response(JSON.stringify({
 }), { headers: { 'content-type': 'application/json' } });
 
 /** 記録しつつ、stream:false の要約リクエストには summary を返す。 */
-const mockFetch = (t: { mock: { method: Function } }, reply: string, summary?: (body: Body) => string) => {
+const mockFetch = (t: Pick<TestContext, 'mock'>, reply: string, summary?: (body: Body) => string) => {
   const bodies: Body[] = [];
   t.mock.method(globalThis, 'fetch', async (_url: string, init: RequestInit) => {
     const body = JSON.parse(String(init.body)) as Body;

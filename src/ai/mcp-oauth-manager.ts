@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { parseJson, ensureDataDirectory } from '../utils.ts';
 import { createServer, type Server } from "node:http";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import type {
@@ -311,7 +313,7 @@ export class McpAuthStore {
   private async load(): Promise<StoreFile> {
     if (this.cache) return this.cache;
     try {
-      const raw = JSON.parse(await readFile(this.file, "utf8")) as StoreFile;
+      const raw = parseJson(await readFile(this.file, "utf8")) as StoreFile;
       const out: StoreFile = {};
       for (const [k, v] of Object.entries(raw ?? {}))
         if (v && typeof v === "object") out[k] = v as StoredAuth;
@@ -330,7 +332,7 @@ export class McpAuthStore {
     const all = await this.load();
     all[server] = data;
     try {
-      await mkdir(path.dirname(this.file), { recursive: true });
+      await ensureDataDirectory(path.dirname(this.file));
       await writeFile(this.file, JSON.stringify(all, null, 2), { mode: 0o600 });
     } catch {
     }

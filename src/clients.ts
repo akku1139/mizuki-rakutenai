@@ -2,7 +2,7 @@
 
 /// The two bot clients (Discord / Fluxer) shared by every feature.
 
-import { Client, GatewayIntentBits } from 'discord.js';
+import { Client, GatewayIntentBits, Partials } from 'discord.js';
 import { config, get } from './config.ts';
 
 /** Bot user IDs, used for mention detection and the AI system prompt. */
@@ -19,11 +19,13 @@ const intents = [
 ];
 
 /** Main bot on Discord. */
-export const discord = new Client({ intents });
+export const discord = new Client({ intents, partials: [Partials.Message], allowedMentions: { parse: [], repliedUser: false } });
 
 /** Bot on Fluxer (Discord-compatible API). */
 export const fluxer = new Client({
   intents,
+  partials: [Partials.Message],
+  allowedMentions: { parse: [], repliedUser: false },
   rest: {
     // do not add / at the last
     api: get(config, 'fluxer.apiBase', 'https://api.fluxer.app'),

@@ -8,6 +8,9 @@ import { log, info, warn, error } from '../log.ts';
 import { SnowflakeUtil } from 'discord.js';
 import {
   type Client,
+  type Guild,
+  type ThreadChannel,
+  type APIEmbed,
   type MessageManager,
   type Message,
   type OmitPartialGroupDMChannel,
@@ -28,6 +31,7 @@ export type AIToolResult = [true, unknown] | [false, { error: string }];
 export interface AIToolMeta {
   /** 呼び出し元のメッセージ (チャンネルやクライアントの解決に使用) */
   msg: OmitPartialGroupDMChannel<Message<boolean>>,
+  attachMessage?: (message: Message<boolean>) => Promise<void>,
 }
 
 export interface AITool {
@@ -113,7 +117,7 @@ const fetchMessage: AITool = {
     },
     required: ['url'],
   },
-  async execute({ url }, { msg }) {
+  async execute({ url }, { msg, attachMessage }) {
     try {
       const parsed = parseMessageUrl(String(url));
       if (!parsed?.messageId || !parsed.guildId) return [false, { error: 'URLのパース中にエラーが発生しました' }];
@@ -126,6 +130,7 @@ const fetchMessage: AITool = {
       const channelGuildId = (channel as { guildId?: string; guild?: { id?: string } }).guildId ?? (channel as { guild?: { id?: string } }).guild?.id;
       if (msg.guild && channelGuildId && channelGuildId !== msg.guild.id) return [false, { error: '別サーバーのチャンネルにはアクセスできません' }];
       const message = await channel.messages.fetch(parsed.messageId) as Message<boolean>;
+      await attachMessage?.(message);
       return [true, await messageToAISchema(message)];
     } catch (err) {
       return [false, errText(err)];
@@ -141,30 +146,28 @@ const fetchMessage: AITool = {
 /** 一度に遡るチャンネルの上限 (`all` のとき) */
 const SEARCH_MAX_CHANNELS = 12;
 
-interface SearchTarget {
-  id: string;
-  name: string;
-  messages: { fetch(options: Record<string, unknown>): Promise<Map<string, any>> };
-}
+type ToolGuild = Guild & { threads?: { cache: ReadonlyMap<string, ThreadChannel> } };
 
-const textChannelsOf = (guild: any, blacklist: readonly string[]): SearchTarget[] => {
+interface SearchTarget { id: string, name: string }
+
+const textChannelsOf = (guild: ToolGuild, blacklist: readonly string[]): SearchTarget[] => {
   const blocked = (id: string, parentId?: string | null): boolean =>
-    blacklist.includes(id) || (parentId !== undefined && parentId !== null && blacklist.includes(parentId));
+    blacklist.includes(id) || (parentId != null && blacklist.includes(parentId));
   const out: SearchTarget[] = [];
-  for (const ch of guild.channels?.cache?.values?.() ?? []) {
-    if (typeof ch?.isTextBased === 'function' && !ch.isTextBased()) continue;
+  for (const ch of guild.channels?.cache?.values() ?? []) {
+    if (typeof ch.isTextBased === 'function' && !ch.isTextBased()) continue;
     if (blocked(ch.id, ch.parentId)) continue;
-    out.push({ id: ch.id, name: `#${ch.name ?? ch.id}`, messages: ch.messages });
+    out.push({ id: ch.id, name: `#${ch.name ?? ch.id}` });
   }
-  for (const t of guild.threads?.cache?.values?.() ?? []) {
+  for (const t of guild.threads?.cache?.values() ?? []) {
     if (blocked(t.id, t.parentId)) continue;
-    out.push({ id: t.id, name: `#${t.parent?.name ?? '?'} / ${t.name}`, messages: t.messages });
+    if (!out.some(c => c.id === t.id)) out.push({ id: t.id, name: `#${t.parent?.name ?? '?'} / ${t.name}` });
   }
   return out;
 };
 
 /** `in:` の値 (チャンネル ID / #名前 / メッセージやチャンネルの URL) を対象に解決する */
-const resolveTargets = (values: readonly string[], guild: any, fallback: SearchTarget): { targets: SearchTarget[], missing: string[] } => {
+const resolveTargets = (values: readonly string[], guild: ToolGuild, fallback: SearchTarget): { targets: SearchTarget[], missing: string[] } => {
   if (values.length === 0) return { targets: [fallback], missing: [] };
   const known = textChannelsOf(guild, []);
   const byId = new Map(known.map(t => [t.id, t]));
@@ -197,8 +200,25 @@ const resolveTargets = (values: readonly string[], guild: any, fallback: SearchT
 /** 検索で使える has: の値 (公式検索の has に対応) */
 const SEARCH_HAS_TYPES = new Set(['image', 'sound', 'video', 'file', 'sticker', 'embed', 'link', 'poll', 'snapshot']);
 
+interface SearchApiMessage {
+  id: string;
+  channel_id: string;
+  guild_id?: string;
+  timestamp?: string;
+  content?: string;
+  pinned?: boolean;
+  author?: { id?: string, username?: string, global_name?: string | null };
+  member?: { nick?: string | null };
+  mentions?: Array<{ id: string }>;
+  embeds?: APIEmbed[];
+  attachments?: Array<{ content_type?: string, filename?: string, url?: string }>;
+  sticker_items?: unknown[];
+  reactions?: unknown[];
+  poll?: unknown;
+}
+
 interface OfficialSearchResult {
-  messages: any[];
+  messages: SearchApiMessage[];
   total: number;
 }
 
@@ -255,7 +275,7 @@ const searchViaApi = async (
     include_nsfw: ('nsfw' in msg.channel ? Boolean((msg.channel as { nsfw?: boolean }).nsfw) : false),
   };
 
-  const collected: any[] = [];
+  const collected: SearchApiMessage[] = [];
   let total = 0;
   let offset = Math.max(0, Math.min(Math.trunc(startOffset), 9_975));
   let retried = false;
@@ -264,9 +284,9 @@ const searchViaApi = async (
       query: new URLSearchParams(
         Object.entries({ ...base, limit: Math.min(25, limit - collected.length), offset })
           .filter(([, v]) => v !== undefined && !(Array.isArray(v) && v.length === 0))
-          .flatMap(([k, v]) => (Array.isArray(v) ? v.map(item => [k, String(item)]) : [[k, String(v)]])) as Array<[string, string]>,
+          .flatMap(([k, v]) => (Array.isArray(v) ? v.map((item: unknown) => [k, String(item)]) : [[k, String(v)]])) as Array<[string, string]>,
       ),
-    }) as { messages?: any[][], total_results?: number, code?: number, retry_after?: number };
+    }) as { messages?: SearchApiMessage[][], total_results?: number, code?: number, retry_after?: number };
 
     // 索引がまだ無い (202)
     if (page?.code === 11_0000 || (page?.retry_after !== undefined && page?.messages === undefined)) {
@@ -290,7 +310,7 @@ const searchViaApi = async (
 };
 
 /** 公式検索の生メッセージを、自前の判定 (`matchesQuery`) が読める形に均す */
-const normalizeApiMessage = (m: any): any => {
+const normalizeApiMessage = (m: SearchApiMessage) => {
   const at = Date.parse(String(m?.timestamp ?? ''));
   return {
     id: m?.id,
@@ -311,7 +331,7 @@ const normalizeApiMessage = (m: any): any => {
     embeds: Array.isArray(m?.embeds) ? m.embeds : [],
     attachments: {
       size: Array.isArray(m?.attachments) ? m.attachments.length : 0,
-      values: () => (Array.isArray(m?.attachments) ? m.attachments : []).map((a: any) => ({
+      values: () => (Array.isArray(m?.attachments) ? m.attachments : []).map(a => ({
         contentType: a?.content_type ?? null,
         name: a?.filename,
         url: a?.url,
@@ -358,7 +378,6 @@ const searchMessages: AITool = {
       const current: SearchTarget = {
         id: msg.channel.id,
         name: 'name' in msg.channel ? `#${(msg.channel as { name: string }).name}` : msg.channel.id,
-        messages: (msg.channel as unknown as SearchTarget).messages,
       };
 
       // 対象チャンネル: channels 引数 > in: > 現在のチャンネル
@@ -377,7 +396,8 @@ const searchMessages: AITool = {
       }
       targets = targets.filter(t => !blacklist.includes(t.id));
       if (targets.length === 0) {
-        const candidates = [...new Set(missing.flatMap(m => channeNameCandidates(msg.guild, m)))].slice(0, 8);
+        const guild = msg.guild;
+        const candidates = [...new Set(missing.flatMap(m => channeNameCandidates(guild, m)))].slice(0, 8);
         return [false, {
           error: `対象のチャンネルが見つかりません: ${missing.join(', ') || 'なし'}`
             + (candidates.length > 0 ? `。近い候補: ${candidates.join(', ')}` : '')
@@ -422,7 +442,7 @@ const searchMessages: AITool = {
         }];
       }
 
-      let collected: Array<{ message: any, target: SearchTarget }> = [];
+      let collected: Array<{ message: ReturnType<typeof normalizeApiMessage>, target: SearchTarget }> = [];
       let total = 0;
       const seen = new Set<string>();
       try {
@@ -457,7 +477,7 @@ const searchMessages: AITool = {
         url: message.url ?? `https://discord.com/channels/${msg.guild!.id}/${message.channel_id ?? target.id}/${message.id}`,
         channelId: message.channel_id ?? target.id,
         channelName: target.name,
-        author: message.author?.username ?? message.author?.global_name ?? '?',
+        author: message.author?.username ?? message.author?.globalName ?? '?',
         authorId: message.author?.id,
         at: (message.createdTimestamp ?? 0) > 0 ? new Date(message.createdTimestamp).toISOString() : undefined,
         content: typeof message.content === 'string' ? message.content.slice(0, 400) : '',
@@ -502,7 +522,7 @@ const searchMessages: AITool = {
 };
 
 /** チャンネル名の候補 (曖昧一致のエラーに添える) */
-const channeNameCandidates = (guild: any, wanted: string, limit = 5): string[] => {
+const channeNameCandidates = (guild: ToolGuild, wanted: string, limit = 5): string[] => {
   const needle = wanted.toLowerCase().replace(/^#/, '').trim();
   const names: string[] = [];
   for (const ch of guild?.channels?.cache?.values?.() ?? []) names.push(String(ch.name ?? ''));
@@ -559,20 +579,20 @@ const resolveChannelArg = async (
   const guild = msg.guild;
   if (guild === null) return { error: { error: 'サーバー外ではチャンネル名で指定できません (URL か ID を使ってください)' } };
 
-  const pools: any[] = [...guild.channels.cache.values(), ...((guild as any).threads?.cache?.values?.() ?? [])]
-    .filter((c: any) => typeof c?.isTextBased === 'function' && c.isTextBased());
+  const pools = [...guild.channels.cache.values(), ...((guild as ToolGuild).threads?.cache?.values() ?? [])]
+    .filter(c => typeof c?.isTextBased === 'function' && c.isTextBased());
   // bot が読めるチャンネルを優先する (名前は合っているのに権限が無い、を避ける)
-  const readable = (c: any): boolean => {
+  const readable = (c: (typeof pools)[number]): boolean => {
     try {
       const me = msg.client.user;
-      const perms = c?.permissionsFor?.(me);
+      const perms = me ? c?.permissionsFor?.(me) : null;
       return perms == null ? true : perms.has('ViewChannel');
     } catch {
       return true;
     }
   };
   const ordered = [...pools.filter(readable), ...pools.filter(c => !readable(c))];
-  const byName = (test: (name: string) => boolean) => ordered.find((c: any) => test(String(c.name ?? '').toLowerCase()));
+  const byName = (test: (name: string) => boolean) => ordered.find(c => test(String(c.name ?? '').toLowerCase()));
   const channel = byName(n => n === wanted)
     ?? byName(n => n.replace(/[-_ ]/g, '') === wanted.replace(/[-_ ]/g, ''))
     ?? byName(n => n.startsWith(wanted))
@@ -618,7 +638,7 @@ const fetchMessagesHistory: AITool = {
       limit: { type: 'number', description: '取得するメッセージ数 (1-100, 既定 30)' },
     },
   },
-  async execute({ channel: channelArg, anchor, direction, limit }, { msg }) {
+  async execute({ channel: channelArg, anchor, direction, limit }, { msg, attachMessage }) {
     try {
       let ch = msg.channel as unknown as HistoryChannel;
       const channelExplicit = channelArg !== undefined && channelArg !== '';
@@ -646,12 +666,12 @@ const fetchMessagesHistory: AITool = {
             for (const c of msg.guild.channels.cache.values()) {
               if (!c.isTextBased()) continue;
               try {
-                const m = await (c as any).messages.fetch(anchorId);
+                const m = await c.messages.fetch(anchorId);
                 if (m) { ch = c as unknown as HistoryChannel; break; }
               } catch {}
             }
             // スレッドも検索
-            for (const t of (msg.guild as any).threads?.cache?.values?.() ?? []) {
+            for (const t of (msg.guild as ToolGuild).threads?.cache?.values() ?? []) {
               try {
                 const m = await t.messages.fetch(anchorId);
                 if (m) { ch = t as unknown as HistoryChannel; break; }
@@ -685,7 +705,7 @@ const fetchMessagesHistory: AITool = {
       const fetchOpts: Record<string, unknown> = { cache: false, limit: lim };
       if (anchorId) fetchOpts[dir === 'after' ? 'after' : dir === 'before' ? 'before' : 'around'] = anchorId;
 
-      let messages: Map<string, any>;
+      let messages: Map<string, Message<boolean>>;
       try {
         messages = await ch.messages.fetch(fetchOpts as Parameters<typeof ch.messages.fetch>[0]);
       } catch (e) {
@@ -702,7 +722,8 @@ const fetchMessagesHistory: AITool = {
         id: m.id,
         ...(await messageToAISchema(m)),
       })));
-      items.sort((a: any, b: any) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+      if (attachMessage) for (const m of messages.values()) await attachMessage(m);
+      items.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
 
       return [true, {
         channel: { id: ch.id, name: (ch as unknown as { name?: string }).name },
@@ -828,8 +849,9 @@ const searchWeb: AITool = {
       }
 
       const normalizedQueries: string[] = [];
+      const inputQueries: unknown[] = queries;
 
-      for (const query of queries) {
+      for (const query of inputQueries) {
         if (typeof query !== 'string') {
           return [false, {
             error: 'queries の各要素は文字列で指定してください',

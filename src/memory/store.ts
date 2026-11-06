@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { parseJson, ensureDataDirectory } from '../utils.ts';
 
 /// サーバーごとの記憶 (事実) の保存。
 ///
@@ -47,6 +48,8 @@ export const MAX_FACT_CHARS = 300;
 const MEMORY_DIR = './data/memory';
 
 const cache = new Map<string, GuildMemory>();
+const loading = new Map<string, Promise<GuildMemory>>();
+const writes = new Map<string, Promise<void>>();
 
 const pathOf = (guildId: string): string => `${MEMORY_DIR}/${guildId}.json`;
 
@@ -63,9 +66,18 @@ const sameText = (a: string, b: string): boolean =>
 export const loadMemory = async (guildId: string): Promise<GuildMemory> => {
   const hit = cache.get(guildId);
   if (hit !== undefined) return hit;
+  const pending = loading.get(guildId);
+  if (pending) return pending;
+  const read = readMemory(guildId);
+  loading.set(guildId, read);
+  try { return await read; }
+  finally { loading.delete(guildId); }
+};
+
+const readMemory = async (guildId: string): Promise<GuildMemory> => {
   let memory: GuildMemory = { guildId, facts: [] };
   try {
-    const raw = JSON.parse(await fs.readFile(pathOf(guildId), 'utf8')) as Partial<GuildMemory>;
+    const raw = parseJson(await fs.readFile(pathOf(guildId), 'utf8')) as Partial<GuildMemory>;
     memory = {
       guildId,
       facts: Array.isArray(raw.facts) ? raw.facts.filter(isFact) : [],
@@ -91,11 +103,16 @@ export const saveMemory = async (memory: GuildMemory): Promise<void> => {
   const trimmed = trimFacts(memory.facts);
   memory.facts = trimmed;
   cache.set(memory.guildId, memory);
-  await fs.mkdir(MEMORY_DIR, { recursive: true });
-  const body = JSON.stringify(memory, null, 2);
-  // 途中で落ちても壊れないよう、書いてから置き換える
-  await fs.writeFile(`${pathOf(memory.guildId)}.tmp`, body);
-  await fs.rename(`${pathOf(memory.guildId)}.tmp`, pathOf(memory.guildId));
+  const write = (writes.get(memory.guildId) ?? Promise.resolve()).catch(() => {}).then(async () => {
+    await ensureDataDirectory(MEMORY_DIR);
+    const body = JSON.stringify(memory, null, 2);
+    // 同じサーバーの並列応答が一時ファイルを上書きしないよう直列に保存する。
+    await fs.writeFile(`${pathOf(memory.guildId)}.tmp`, body);
+    await fs.rename(`${pathOf(memory.guildId)}.tmp`, pathOf(memory.guildId));
+  });
+  writes.set(memory.guildId, write);
+  try { await write; }
+  finally { if (writes.get(memory.guildId) === write) writes.delete(memory.guildId); }
 };
 
 /** 上限を超えたら、pinned 以外の古いものから捨てる */

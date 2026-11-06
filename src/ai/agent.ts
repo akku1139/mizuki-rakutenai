@@ -12,12 +12,15 @@ export type TokenUsage = Extract<AIEvent, { type: 'usage' }>['usage'];
 
 export interface AgentHooks {
   /** すべてのイベント (進捗の表示や記録に使う)。await されるので、重い処理は中で待たせない */
-  onEvent?(event: AIEvent): void | Promise<void>;
+  onEvent?(event: AIEvent, signal: AbortSignal): void | Promise<void>;
   /** 中断。ループを抜けてストリームを閉じる */
   signal?: AbortSignal;
   /** 何イベントごとに onTick を呼ぶか (Discord の typing 用)。0 で無効 */
   tickEvery?: number;
   onTick?(): void;
+  beforeRequest?: () => Promise<ChatContents>;
+  /** イベントが途絶えてから中断するまで (既定 120 秒) */
+  idleTimeoutMs?: number;
 }
 
 export interface AgentResult {
@@ -51,9 +54,29 @@ export const runAgent = async (
   let aborted = false;
   let events = 0;
 
-  const stream = chat.sendMessage({ contents, meta });
+  const controller = new AbortController();
+  const signal = hooks.signal ? AbortSignal.any([hooks.signal, controller.signal]) : controller.signal;
+  if (signal.aborted) return { text, tools, aborted: true, events };
+  const stream = chat.sendMessage({ contents, meta, signal, beforeRequest: hooks.beforeRequest });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const resetTimeout = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(new Error('生成の進捗が120秒間ありません')), hooks.idleTimeoutMs ?? 120_000);
+    timer.unref?.();
+  };
+  let onAbort: () => void = () => {};
+  const stopped = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason ?? new Error('中断しました'));
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
   try {
-    for await (const event of stream) {
+    signal.throwIfAborted();
+    resetTimeout();
+    while (true) {
+      const next = await Promise.race([stream.next(), stopped]);
+      if (next.done) break;
+      const event = next.value;
+      resetTimeout();
       events++;
       if (hooks.tickEvery !== undefined && hooks.tickEvery > 0 && hooks.onTick !== undefined && events % hooks.tickEvery === 0) {
         hooks.onTick();
@@ -66,7 +89,12 @@ export const runAgent = async (
           tools.set(event.data.name, (tools.get(event.data.name) ?? 0) + 1);
           break;
         case 'usage':
-          usage = event.usage;
+          usage = {
+            inputTokens: (usage?.inputTokens ?? 0) + event.usage.inputTokens,
+            outputTokens: (usage?.outputTokens ?? 0) + event.usage.outputTokens,
+            ...((usage?.cachedInputTokens !== undefined || event.usage.cachedInputTokens !== undefined)
+              ? { cachedInputTokens: (usage?.cachedInputTokens ?? 0) + (event.usage.cachedInputTokens ?? 0) } : {}),
+          };
           break;
         case 'error':
           error = { code: event.code, message: event.message };
@@ -74,15 +102,23 @@ export const runAgent = async (
         default:
           break;
       }
-      if (hooks.onEvent !== undefined) await hooks.onEvent(event);
+      if (hooks.onEvent !== undefined) await Promise.race([Promise.resolve(hooks.onEvent(event, signal)), stopped]);
       if (hooks.signal?.aborted === true) {
         aborted = true;
         break;
       }
     }
+  } catch (e) {
+    if (!signal.aborted) throw e;
+    aborted = true;
+    if (!hooks.signal?.aborted) error = { code: 'timeout', message: String(signal.reason) };
   } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', onAbort);
     // 途中で抜けたらストリームを閉じる (接続を残さない)
-    await stream.return(undefined).catch(() => {});
+    // 停止したプロバイダの return も待ち続けない。
+    if (signal.aborted) void stream.return(undefined).catch(() => {});
+    else await stream.return(undefined).catch(() => {});
   }
 
   return { text, ...(usage !== undefined ? { usage } : {}), tools, ...(error !== undefined ? { error } : {}), aborted, events };

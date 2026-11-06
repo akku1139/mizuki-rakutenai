@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -18,8 +19,8 @@ const fakeMessage = (id: string, content: string, extra: object = {}) => ({
   author: { id: 'u1', displayName: 'User', globalName: null, username: 'user', bot: false },
   reference: null,
   embeds: [],
-  attachments: new Map(),
-  messageSnapshots: new Map(),
+  attachments: new Map<string, unknown>(),
+  messageSnapshots: new Map<string, unknown>(),
   ...extra,
 });
 
@@ -106,6 +107,17 @@ test('fetch_message reports a channel that cannot be read and errors from the AP
   const [ok, value] = await executeAITool('fetch_message', { url: 'https://discord.com/channels/1/2/3' }, meta({}));
   assert.equal(ok, false);
   assert.match((value as { error: string }).error, /Error: Missing Access/);
+});
+
+test('fetch_messageは取得したメッセージの添付を次の生成へ渡せる', async t => {
+  const message = fakeMessage('3', '画像を見て');
+  const { channel } = fakeChannel('2', [message]);
+  t.mock.method(discord.channels, 'fetch', async () => channel);
+  const attached: string[] = [];
+  const context = { ...meta({}), attachMessage: async (m: { id: string }) => { attached.push(m.id); } };
+  const [ok] = await executeAITool('fetch_message', { url: 'https://discord.com/channels/1/2/3' }, context);
+  assert.equal(ok, true);
+  assert.deepEqual(attached, ['3']);
 });
 
 test('the web tools call their endpoints with the query and a User-Agent, and report HTTP errors', async t => {

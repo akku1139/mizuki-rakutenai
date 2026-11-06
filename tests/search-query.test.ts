@@ -57,11 +57,11 @@ const fakeMessage = (id: string, content: string, extra: object = {}) => ({
   createdTimestamp: Date.parse('2026-10-20T00:00:00Z'),
   pinned: false,
   author: { id: 'u1', username: 'tako', globalName: null, displayName: 'たこ' },
-  mentions: { users: new Map() },
+  mentions: { users: new Map<string, unknown>() },
   embeds: [],
-  attachments: new Map(),
-  stickers: new Map(),
-  reactions: { cache: new Map() },
+  attachments: new Map<string, unknown>(),
+  stickers: new Map<string, unknown>(),
+  reactions: { cache: new Map<string, unknown>() },
   ...extra,
 });
 
@@ -81,7 +81,7 @@ const fakeClient = (respond: (path: string, options: unknown) => unknown) => {
   };
 };
 
-const meta = (client: object, channel: object, members: { cache: Map<string, unknown>, fetch?: Function } = { cache: new Map() }) => ({
+const meta = (client: object, channel: object, members: { cache: Map<string, unknown>, fetch?: (options: unknown) => Promise<Map<string, unknown>> } = { cache: new Map<string, unknown>() }) => ({
   msg: {
     id: '100',
     channelId: '2',
@@ -89,7 +89,7 @@ const meta = (client: object, channel: object, members: { cache: Map<string, unk
       id: '1',
       members,
       channels: { cache: new Map([['2', channel]]) },
-      threads: { cache: new Map() },
+      threads: { cache: new Map<string, unknown>() },
     },
     channel,
     client,
@@ -115,7 +115,7 @@ const apiMessage = (id: string, content: string, extra: object = {}) => ({
 });
 
 test('公式の検索 API に条件を渡し、結果を整形して返す', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   const { calls, client } = fakeClient(() => ({
     total_results: 2,
     messages: [[
@@ -145,7 +145,7 @@ test('公式の検索 API に条件を渡し、結果を整形して返す', asy
 });
 
 test('公式検索が使えないときはエラーを返す (自前で遡るフォールバックは持たない)', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   const { client } = fakeClient(() => { throw new Error('403 Missing Access'); });
   const result = await executeAITool('search_messages', { query: 'デプロイ' }, meta(client, channel));
 
@@ -156,7 +156,7 @@ test('公式検索が使えないときはエラーを返す (自前で遡るフ
 });
 
 test('has: はそのまま検索 API に渡す', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   const { calls, client } = fakeClient(() => ({
     messages: [[apiMessage('20', 'デプロイ', { attachments: [{ id: 'a', filename: 'a.png', content_type: 'image/png' }] })]],
   }));
@@ -174,7 +174,7 @@ test('日本語の長い文は語に割ってから検索する', () => {
 });
 
 test('OR は API が解釈しないので、1 つずつ検索してまとめる', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   const contents: string[] = [];
   const { client } = fakeClient((_path, options) => {
     const query = (options as { query: URLSearchParams }).query;
@@ -192,7 +192,7 @@ test('OR は API が解釈しないので、1 つずつ検索してまとめる'
 });
 
 test('API が解釈しない条件だけのクエリは、黙って全件を返さずエラーにする', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   const { client } = fakeClient(() => ({ total_results: 0, messages: [] }));
   for (const query of ['regex:/techfish/i', 'len:>50']) {
     const result = await executeAITool('search_messages', { query }, meta(client, channel));
@@ -202,7 +202,7 @@ test('API が解釈しない条件だけのクエリは、黙って全件を返�
 });
 
 test('索引がまだ無い (202) と言われたら 1 回だけ待ってやり直す', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   let calls = 0;
   const { client } = fakeClient(() => {
     calls++;
@@ -217,7 +217,7 @@ test('索引がまだ無い (202) と言われたら 1 回だけ待ってやり�
 });
 
 test('検索結果はチャンネルの ID と名前を返し、次に使える形にする', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   const { client } = fakeClient(() => ({ total_results: 1, messages: [[apiMessage('20', 'デプロイ 失敗')]] }));
   const result = await executeAITool('search_messages', { query: 'デプロイ' }, meta(client, channel));
   assert.equal(result[0], true);
@@ -237,14 +237,14 @@ test('fetch_messages_history はチャンネル名でも引ける (曖昧一致�
   const fullMessage = {
     ...fakeMessage('5', 'ok'),
     createdAt: new Date('2026-10-20T00:00:00Z'),
-    messageSnapshots: new Map(),
+    messageSnapshots: new Map<string, unknown>(),
     author: { id: 'u1', username: 'tako', globalName: null, displayName: 'たこ', bot: false },
   };
   const takenGeneral = { id: '9', name: 'taken-general', isTextBased: () => true, messages: { fetch: async () => new Map([['5', fullMessage]]) } };
   const guild = {
     id: '1',
     channels: { cache: new Map([['9', takenGeneral]]) },
-    threads: { cache: new Map() },
+    threads: { cache: new Map<string, unknown>() },
   };
   const fetched: unknown[] = [];
   const client = { channels: { fetch: async (id: string) => (id === '9' ? takenGeneral : null) } };
@@ -253,7 +253,7 @@ test('fetch_messages_history はチャンネル名でも引ける (曖昧一致�
       id: '100',
       channelId: '2',
       guild,
-      channel: { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } },
+      channel: { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } },
       client,
     },
   } as unknown as Parameters<typeof executeAITool>[2];
@@ -287,8 +287,8 @@ test('読めないチャンネルは権限のエラーで返す (50001 をその
   };
   const metaWith = (channel: object) => ({
     msg: {
-      id: '1', channelId: '2', guild: { id: '1', channels: { cache: new Map([['7', channel]]) }, threads: { cache: new Map() } },
-      channel: { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } },
+      id: '1', channelId: '2', guild: { id: '1', channels: { cache: new Map([['7', channel]]) }, threads: { cache: new Map<string, unknown>() } },
+      channel: { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } },
       client: { channels: { fetch: async () => channel } },
     },
   }) as unknown as Parameters<typeof executeAITool>[2];
@@ -307,7 +307,7 @@ test('読めないチャンネルは権限のエラーで返す (50001 をその
 });
 
 test('検索語が無いときは API を叩かずエラーにする (最新の羅列を返さない)', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   let calls = 0;
   const { client } = fakeClient(() => { calls++; return { total_results: 0, messages: [] }; });
   for (const args of [{}, { query: '' }, { query: '   ' }] as Array<Record<string, unknown>>) {
@@ -319,7 +319,7 @@ test('検索語が無いときは API を叩かずエラーにする (最新の�
 });
 
 test('条件だけのクエリは API に渡す (has: だけでも検索できる)', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   const { calls, client } = fakeClient(() => ({ total_results: 1, messages: [[apiMessage('20', '')]] }));
   const result = await executeAITool('search_messages', { query: 'has:image' }, meta(client, channel));
   assert.equal(result[0], true);
@@ -328,14 +328,14 @@ test('条件だけのクエリは API に渡す (has: だけでも検索でき�
 });
 
 test('チャンネルを指定しないときは、そのことを結果に書く', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   const { client } = fakeClient(() => ({ total_results: 1, messages: [[apiMessage('20', 'techfish')]], }));
   const result = await executeAITool('search_messages', { query: 'techfish' }, meta(client, channel));
   assert.match(String((result[1] as { scope?: string }).scope), /現在のチャンネルだけ/);
 });
 
 test('実際に検索した条件を結果に含める (モデルが確認できる)', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   const { client } = fakeClient(() => ({ total_results: 1, messages: [[apiMessage('20', 'GMO の話')]] }));
   const result = await executeAITool('search_messages', { query: 'GMO' }, meta(client, channel));
   const value = result[1] as { request: { content: string | null, channels: string[] } };
@@ -344,7 +344,7 @@ test('実際に検索した条件を結果に含める (モデルが確認でき
 });
 
 test('query が文字列でなければ断る (空扱いにしない)', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   let calls = 0;
   const { client } = fakeClient(() => { calls++; return { total_results: 0, messages: [] }; });
   const result = await executeAITool('search_messages', { query: { q: 'GMO' } }, meta(client, channel));
@@ -354,7 +354,7 @@ test('query が文字列でなければ断る (空扱いにしない)', async ()
 });
 
 test('offset で 2 ページ目以降を読める (total と nextOffset を返す)', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   const offsets: string[] = [];
   const { client } = fakeClient((_path, options) => {
     const query = (options as { query: URLSearchParams }).query;
@@ -370,7 +370,7 @@ test('offset で 2 ページ目以降を読める (total と nextOffset を返�
 });
 
 test('limit が 25 を超えたら 25 件ずつページングする', async () => {
-  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map() } };
+  const channel = { id: '2', name: 'general', isTextBased: () => true, messages: { fetch: async () => new Map<string, unknown>() } };
   const calls: Array<{ limit: string | null, offset: string | null }> = [];
   let id = 100;
   const { client } = fakeClient((_path, options) => {
