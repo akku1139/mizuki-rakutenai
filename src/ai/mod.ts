@@ -127,9 +127,9 @@ const openAIConfig = (model?: string) => {
   const active = get(config, 'ai.activeOpenaiProfile', null);
   const profile = active ? get(config, `ai.openaiProfiles.${active}`, {}) : {};
   return {
-    baseUrl: profile.baseUrl ?? get(config, 'ai.openaiProfiles.openai.baseUrl', process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1'),
-    apiKey: profile.apiKey ?? get(config, 'ai.openaiProfiles.openai.apiKey', process.env['OPENAI_API_KEY'] ?? ''),
-    model: model ?? profile.model ?? get(config, 'ai.openaiProfiles.openai.model', process.env['OPENAI_MODEL'] ?? 'gpt-4o-mini'),
+    baseUrl: profile.baseUrl ?? get(config, 'ai.openaiProfiles.openai.baseUrl', process.env['OPENAI_BASE_URL']),
+    apiKey: profile.apiKey ?? get(config, 'ai.openaiProfiles.openai.apiKey', process.env['OPENAI_API_KEY']),
+    model: model ?? profile.model ?? get(config, 'ai.openaiProfiles.openai.model', process.env['OPENAI_MODEL']),
     contextWindowTokens: profile.contextWindowTokens ?? get(config, 'ai.contextWindowTokens', undefined),
   };
 };
