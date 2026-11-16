@@ -52,7 +52,7 @@ export const setupLogging = ({ client, guildId, webhook, footerText, doNotCheckB
   };
 
   client.on('messageDelete', async m => {
-    if (m.guildId !== guildId || (m.author?.bot ?? doNotCheckBot)) return;
+    if (m.guildId !== guildId || (m.author?.bot && doNotCheckBot)) return;
     await sendLog({
       description: `:wastebasket: **Message sent by ${userMention(m.author)} deleted in <#${m.channelId}>.**\n${truncate(m.content ?? '', 3900)}`,
       footer: {
@@ -68,7 +68,7 @@ export const setupLogging = ({ client, guildId, webhook, footerText, doNotCheckB
   });
 
   client.on('messageUpdate', async (o, n) => {
-    if (o.guildId !== guildId || o.author?.id === webhook.id || o.content === n.content || (o.author?.bot ?? doNotCheckBot)) return;
+    if (o.guildId !== guildId || o.author?.id === webhook.id || o.content === n.content || (o.author?.bot && doNotCheckBot)) return;
     await sendLog({
       description: `:pencil2: **Message sent by ${userMention(o.author)} edited in <#${o.channelId}>.**  [Jump to Message](${o.url})`,
       footer: {
