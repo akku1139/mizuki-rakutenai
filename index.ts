@@ -8,7 +8,6 @@ import { discord, fluxer } from './src/clients.ts';
 import { config, get } from './src/config.ts';
 import { setupAI } from './src/ai/mod.ts';
 import { setupAnka } from './src/anka.ts';
-import { setupCoinWatch } from './src/coinwatch.ts';
 import { setupFluxSync } from './src/fluxsync/mod.ts';
 import { setupAllLogging } from './src/logging/mod.ts';
 import { setupAdmin } from './src/admin/mod.ts';
@@ -33,7 +32,6 @@ fluxer.on('clientReady', readyClient => {
 setupAI();
 setupFluxSync();
 setupAllLogging();
-setupCoinWatch();
 setupAnka();
 setupAdmin();
 
