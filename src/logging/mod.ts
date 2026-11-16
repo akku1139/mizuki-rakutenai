@@ -41,7 +41,7 @@ const truncate = (text: string, max: number): string =>
   text.length <= max ? text : text.slice(0, max - 1) + '…';
 
 /** A field value (max 1024) wrapped in a code block. */
-const codeField = (text: string | null): string => '```md\n' + truncate(text ?? '', 1024 - 10).replaceAll(/^```/, '\\`\\`\\`') + '\n```';
+const codeField = (text: string | null): string => '```md\n' + truncate(text ?? '', 1024 - 10).replaceAll(/^```/g, '\\`\\`\\`') + '\n```';
 
 /** The author is unknown when the message was not cached. */
 const userMention = (u: { id: string } | null | undefined): string => u ? `<@${u.id}>` : 'unknown user';
