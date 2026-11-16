@@ -13,6 +13,7 @@ interface LogConfig {
   guildId: string,
   webhook: WebhookClient,
   footerText: string,
+  doNotCheckBot: boolean,
 }
 
 const logwh = new WebhookClient({ url: get(config, 'discord.logWebhookUrl', process.env['DISCORD_LOG_WEBHOOK'])! });
@@ -45,13 +46,13 @@ const codeField = (text: string | null): string => '```md\n' + truncate(text ?? 
 /** The author is unknown when the message was not cached. */
 const userMention = (u: { id: string } | null | undefined): string => u ? `<@${u.id}>` : 'unknown user';
 
-export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig): void => {
+export const setupLogging = ({ client, guildId, webhook, footerText, doNotCheckBot }: LogConfig): void => {
   const sendLog = async (embed: Record<string, unknown>): Promise<void> => {
     await webhook.send({ embeds: [embed] });
   };
 
   client.on('messageDelete', async m => {
-    if (m.guildId !== guildId) return;
+    if (m.guildId !== guildId || (m.author?.bot ?? doNotCheckBot)) return;
     await sendLog({
       description: `:wastebasket: **Message sent by ${userMention(m.author)} deleted in <#${m.channelId}>.**\n${truncate(m.content ?? '', 3900)}`,
       footer: {
@@ -67,7 +68,7 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
   });
 
   client.on('messageUpdate', async (o, n) => {
-    if (o.guildId !== guildId || o.author?.id === webhook.id || o.content === n.content) return;
+    if (o.guildId !== guildId || o.author?.id === webhook.id || o.content === n.content || (o.author?.bot ?? doNotCheckBot)) return;
     await sendLog({
       description: `:pencil2: **Message sent by ${userMention(o.author)} edited in <#${o.channelId}>.**  [Jump to Message](${o.url})`,
       footer: {
@@ -128,6 +129,6 @@ export const setupLogging = ({ client, guildId, webhook, footerText }: LogConfig
 };
 
 export const setupAllLogging = (): void => {
-  setupLogging({ client: discord, guildId: evexID, webhook: logwh, footerText: 'Evex Developers' });
-  setupLogging({ client: fluxer, guildId: evexIDFluxer, webhook: logwhFluxer, footerText: 'Evex Developers@Fluxer.app' });
+  setupLogging({ client: discord, guildId: evexID, webhook: logwh, footerText: 'Evex Developers', doNotCheckBot: true });
+  setupLogging({ client: fluxer, guildId: evexIDFluxer, webhook: logwhFluxer, footerText: 'Evex Developers@Fluxer.app', doNotCheckBot: false });
 };
