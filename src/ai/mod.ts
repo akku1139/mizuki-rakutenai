@@ -165,8 +165,9 @@ const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, 
 };
 
 const BAN_LIST: Snowflake[] = [
-  '780271314086526986', // たまね
-  '851357394976899116', // Rion
+  '780271314086526986', // たまね, なんか前abuseしてたので
+  '851357394976899116', // Rion, よくわからん
+  '665828120330240001', // noname, abuseされたので
 ];
 
 const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
