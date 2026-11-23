@@ -164,12 +164,18 @@ const sendMessage = async (text: string, m: OmitPartialGroupDMChannel<Message>, 
   return sentMessages;
 };
 
+const BAN_LIST: Snowflake[] = [
+  '780271314086526986', // たまね
+  '851357394976899116', // Rion
+];
+
 const aiHandler = async (m: OmitPartialGroupDMChannel<Message<boolean>>) => {
   if (
     !m.author.bot
     && (m.mentions.users.has(DISCORD_USER_ID) || m.mentions.users.has(FLUXER_USER_ID) || /mizuki|瑞稀/i.test(m.content))
     && (m.channel instanceof TextChannel || m.channel instanceof ThreadChannel)
     && m.guild !== null
+    && !BAN_LIST.includes(m.author.id)
   ) {
     // セッションは「チャンネル x ユーザー」単位。Fluxer同期チャンネルはDiscord側のIDに正規化する。
     const channelKey = whMapFluxer[m.channelId] ? whMapFluxer[m.channelId].targetChannelID : m.channelId;
